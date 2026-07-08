@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import html
 import io
 import json
@@ -169,7 +170,19 @@ def write_config(text: str) -> None:
     make_backup()
     tmp = CONFIG_PATH.with_suffix(".toml.tmp")
     tmp.write_text(text, encoding="utf-8")
-    tmp.replace(CONFIG_PATH)
+    try:
+        tmp.replace(CONFIG_PATH)
+    except OSError as exc:
+        if exc.errno != errno.EBUSY:
+            raise
+        # Some container filesystems, notably MikroTik containers bind mounts,
+        # reject atomic rename over a mounted/busy config file. Keep those
+        # deployments working by updating the existing inode in place.
+        with CONFIG_PATH.open("w", encoding="utf-8") as target:
+            target.write(text)
+            target.flush()
+            os.fsync(target.fileno())
+        tmp.unlink(missing_ok=True)
 
 
 def ensure_metrics_listen() -> None:
