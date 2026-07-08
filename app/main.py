@@ -326,16 +326,25 @@ def get_top_level_setting(text: str, key: str, default: str = "") -> str:
     return default
 
 
+def get_any_setting(text: str, key: str, default: str = "") -> str:
+    for line in text.splitlines():
+        m = ASSIGN_RE.match(line)
+        if m and m.group("key") == key:
+            return parse_value(m.group("value"))
+    return default
+
+
 def telemt_public_host(text: str) -> str:
     return (
         get_top_level_setting(text, "public_host")
+        or get_any_setting(text, "public_host")
         or get_setting(text, "censorship", "tls_domain")
         or "telemt.example.com"
     )
 
 
 def telemt_public_port(text: str) -> int:
-    raw = get_top_level_setting(text, "public_port", "443")
+    raw = get_top_level_setting(text, "public_port") or get_any_setting(text, "public_port", "443")
     try:
         return int(raw)
     except ValueError:
@@ -343,7 +352,7 @@ def telemt_public_port(text: str) -> int:
 
 
 def telemt_endpoint(host: str, port: int) -> str:
-    return host if port == 443 else f"{host}:{port}"
+    return f"{host}:{port}"
 
 
 def telemt_config_info(text: str) -> dict[str, Any]:
