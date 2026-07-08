@@ -316,6 +316,67 @@ def get_setting(text: str, section: str, key: str, default: str = "") -> str:
     return default
 
 
+def get_top_level_setting(text: str, key: str, default: str = "") -> str:
+    for line in text.splitlines():
+        if SECTION_RE.match(line):
+            break
+        m = ASSIGN_RE.match(line)
+        if m and m.group("key") == key:
+            return parse_value(m.group("value"))
+    return default
+
+
+def telemt_public_host(text: str) -> str:
+    return (
+        get_top_level_setting(text, "public_host")
+        or get_setting(text, "censorship", "tls_domain")
+        or "telemt.example.com"
+    )
+
+
+def telemt_public_port(text: str) -> int:
+    raw = get_top_level_setting(text, "public_port", "443")
+    try:
+        return int(raw)
+    except ValueError:
+        return 443
+
+
+def telemt_endpoint(host: str, port: int) -> str:
+    return host if port == 443 else f"{host}:{port}"
+
+
+def telemt_config_info(text: str) -> dict[str, Any]:
+    host = telemt_public_host(text)
+    port = telemt_public_port(text)
+    users = parse_assignments(text.splitlines(), "access.users")
+    limits = parse_assignments(text.splitlines(), "access.user_max_unique_ips")
+    blocked = sum(1 for item in users.values() if item.get("blocked"))
+    return {
+        "public_host": host,
+        "public_port": port,
+        "endpoint": telemt_endpoint(host, port),
+        "server": {
+            "listen": get_setting(text, "server", "listen", ""),
+            "metrics_listen": get_setting(text, "server", "metrics_listen", ""),
+        },
+        "censorship": {
+            "tls_domain": get_setting(text, "censorship", "tls_domain", ""),
+            "mask_host": get_setting(text, "censorship", "mask_host", ""),
+        },
+        "access": {
+            "users": len(users),
+            "blocked_users": blocked,
+            "limited_users": len(limits),
+        },
+        "admin": {
+            "metrics_enabled": ENABLE_METRICS,
+            "metrics_url": METRICS_URL,
+            "auto_fix_metrics_listen": AUTO_FIX_METRICS_LISTEN,
+        },
+    }
+
+
 def validate_name(name: str) -> None:
     if not NAME_RE.match(name):
         raise HTTPException(400, "Имя может содержать только латиницу, цифры, '_' и '-'.")
@@ -336,8 +397,9 @@ def domain_hex(domain: str) -> str:
     return domain.encode("utf-8").hex()
 
 
-def make_link(secret: str, domain: str) -> str:
-    return f"tg://proxy?server={domain}&port=443&secret=ee{secret}{domain_hex(domain)}"
+def make_link(secret: str, host: str, port: int, tls_domain: str) -> str:
+    sni_domain = tls_domain or host
+    return f"tg://proxy?server={host}&port={port}&secret=ee{secret}{domain_hex(sni_domain)}"
 
 
 def make_qr_data_uri(link: str) -> str:
@@ -542,7 +604,9 @@ def upsert_user(data: UserInput, old_name: str | None = None) -> None:
 
 def list_users() -> list[UserRecord]:
     text = read_config()
-    domain = get_setting(text, "censorship", "tls_domain", "telemt.example.com")
+    host = telemt_public_host(text)
+    port = telemt_public_port(text)
+    tls_domain = get_setting(text, "censorship", "tls_domain", host)
     lines = text.splitlines()
     users = parse_assignments(lines, "access.users")
     limits = parse_assignments(lines, "access.user_max_unique_ips")
@@ -555,7 +619,7 @@ def list_users() -> list[UserRecord]:
         limit = int(limit_item["value"]) if limit_item and str(limit_item["value"]).isdigit() else 0
         comment = u["comment"]
         secret = validate_secret(str(u["value"]))
-        link = make_link(secret, domain)
+        link = make_link(secret, host, port, tls_domain)
         stats = user_stats(metrics.get(name, {}))
         result.append(UserRecord(name, secret, limit, comment, blocked, u["added_at"], u["updated_at"], u["blocked_at"], stats, link, make_qr_data_uri(link)))
     return result
@@ -752,14 +816,23 @@ def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
     text = read_config()
     users = list_users()
     metrics_available = any(user.stats.get("available") for user in users)
+    config = telemt_config_info(text)
     return {
         "users": [u.__dict__ for u in users],
-        "domain": get_setting(text, "censorship", "tls_domain", "telemt.example.com"),
+        "domain": config["endpoint"],
+        "public_host": config["public_host"],
+        "public_port": config["public_port"],
+        "config": config,
         "metrics": {"enabled": ENABLE_METRICS, "url": METRICS_URL, "available": metrics_available},
         "default_lang": DEFAULT_LANG,
         "default_theme": DEFAULT_THEME,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
+
+
+@app.get("/api/telemt/config")
+def api_telemt_config(_: None = Depends(require_auth)) -> dict[str, Any]:
+    return telemt_config_info(read_config())
 
 
 @app.get("/api/users/{name}/stats")
@@ -907,8 +980,12 @@ PAGE = r"""
     .lang-select { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     h1 { margin: 0; font-size: 26px; line-height: 1.1; letter-spacing: 0; }
     .subtitle { margin-top: 6px; color: var(--muted); font-size: 14px; }
+    .subtitle button { height: auto; min-height: 0; border: 0; background: transparent; padding: 0; color: var(--accent-dark); font-weight: 700; vertical-align: baseline; }
+    .subtitle button:hover { border: 0; text-decoration: underline; }
     .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: space-between; margin-top: 14px; }
     .toolbar-side { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .toolbar-stack { display: grid; gap: 6px; justify-items: end; }
+    .toolbar-updated { color: var(--muted); font-size: 12px; min-height: 16px; }
     button, a.button-link { height: 38px; border: 1px solid var(--line); border-radius: 7px; background: var(--control); color: var(--ink); padding: 0 12px; font: inherit; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
     button:hover, a.button-link:hover { border-color: var(--line-strong); }
     button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -988,6 +1065,10 @@ PAGE = r"""
     .metric-row:last-child { border-bottom: 0; }
     .metric-row code { color: var(--muted); overflow-wrap: anywhere; }
     .stats-updated { color: var(--muted); font-size: 12px; margin: -4px 0 12px; }
+    .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .config-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: var(--soft-2); min-width: 0; }
+    .config-item span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .config-item b, .config-item code { display: block; color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
     .qr { width: 220px; height: 220px; image-rendering: crisp-edges; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: #fff; }
     .copy-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; width: 100%; }
     .toast { position: fixed; right: 18px; bottom: 18px; background: #13212c; color: #fff; padding: 11px 13px; border-radius: 7px; opacity: 0; transform: translateY(8px); transition: .18s ease; pointer-events: none; }
@@ -1003,6 +1084,7 @@ PAGE = r"""
       .grid { grid-template-columns: 1fr; }
       .copy-row { grid-template-columns: 1fr; }
       .stats-grid { grid-template-columns: 1fr 1fr; }
+      .config-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1060,15 +1142,18 @@ PAGE = r"""
       <div class="toolbar-side">
         <button type="button" class="primary icon large" id="addBtn" data-i18n-title="common.add" title="Добавить">＋</button>
       </div>
-      <div class="toolbar-side">
-        <label for="refreshInterval" style="margin: 0; color: var(--muted);" data-i18n="common.auto">Авто</label>
-        <select id="refreshInterval">
-          <option value="0" data-i18n="time.off">off</option>
-          <option value="1000" data-i18n="time.1s">1s</option>
-          <option value="10000" data-i18n="time.10s">10s</option>
-          <option value="60000" data-i18n="time.60s">60s</option>
-        </select>
-        <button type="button" class="icon large" id="refreshBtn" data-i18n-title="common.refresh" title="Обновить">↻</button>
+      <div class="toolbar-stack">
+        <div class="toolbar-side">
+          <label for="refreshInterval" style="margin: 0; color: var(--muted);" data-i18n="common.auto">Авто</label>
+          <select id="refreshInterval">
+            <option value="0" data-i18n="time.off">off</option>
+            <option value="1000" data-i18n="time.1s">1s</option>
+            <option value="10000" data-i18n="time.10s">10s</option>
+            <option value="60000" data-i18n="time.60s">60s</option>
+          </select>
+          <button type="button" class="icon large" id="refreshBtn" data-i18n-title="common.refresh" title="Обновить">↻</button>
+        </div>
+        <div class="toolbar-updated" id="updatedAt"></div>
       </div>
     </div>
   </div>
@@ -1177,10 +1262,20 @@ PAGE = r"""
     </div>
   </dialog>
 
+  <dialog id="configDialog">
+    <div class="modal-head">
+      <h2 data-i18n="modal.telemtConfig">Настройки TeleMT</h2>
+      <button type="button" class="icon" data-close="configDialog" data-i18n-title="common.close" title="Закрыть">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="config-grid" id="configGrid"></div>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", metrics: { enabled: true, available: false, url: "" }, editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", config: null, metrics: { enabled: true, available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
 
     function t(key, params = {}) {
@@ -1250,9 +1345,13 @@ PAGE = r"""
       const data = await request("api/users");
       state.users = data.users;
       state.domain = data.domain;
+      state.config = data.config || null;
       state.metrics = data.metrics || { enabled: true, available: false, url: "" };
+      state.updatedAt = data.updated_at;
       const metricsText = !state.metrics.enabled ? t("metrics.off") : (state.metrics.available ? t("metrics.on") : t("metrics.down"));
-      $("subtitle").textContent = `${t("app.domain")}: ${data.domain}. ${t("app.metrics")}: ${metricsText}. ${t("app.updated")}: ${new Date(data.updated_at).toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US")}`;
+      $("subtitle").innerHTML = `${esc(t("app.domain"))}: <button type="button" id="configLink">${esc(data.domain)}</button>. ${esc(t("app.metrics"))}: ${esc(metricsText)}.`;
+      $("configLink").onclick = showConfig;
+      $("updatedAt").textContent = `${t("app.updated")}: ${formatFullDate(data.updated_at)}`;
       $("telemtStatsBtn").hidden = !state.metrics.enabled;
       render();
     }
@@ -1289,6 +1388,13 @@ PAGE = r"""
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return "N/A";
       return date.toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function formatFullDate(value) {
+      if (!value) return "N/A";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "N/A";
+      return date.toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US");
     }
 
     function formatBytes(bytes) {
@@ -1535,6 +1641,33 @@ PAGE = r"""
       openDialog("telemtStatsDialog");
       await refreshTelemtStatsModal();
       restartTelemtStatsRefresh();
+    }
+
+    function configItem(label, value) {
+      const display = value === "" || value === null || value === undefined ? "N/A" : value;
+      return `<div class="config-item"><span>${esc(label)}</span><code>${esc(display)}</code></div>`;
+    }
+
+    async function showConfig() {
+      const data = await request("api/telemt/config");
+      state.config = data;
+      const rows = [
+        [t("config.publicEndpoint"), data.endpoint],
+        [t("config.publicHost"), data.public_host],
+        [t("config.publicPort"), data.public_port],
+        [t("config.serverListen"), data.server?.listen],
+        [t("config.metricsListen"), data.server?.metrics_listen],
+        [t("config.tlsDomain"), data.censorship?.tls_domain],
+        [t("config.maskHost"), data.censorship?.mask_host],
+        [t("config.metricsUrl"), data.admin?.metrics_url],
+        [t("config.metricsEnabled"), data.admin?.metrics_enabled ? t("common.yes") : t("common.no")],
+        [t("config.autoFixMetrics"), data.admin?.auto_fix_metrics_listen ? t("common.yes") : t("common.no")],
+        [t("config.users"), data.access?.users],
+        [t("config.blockedUsers"), data.access?.blocked_users],
+        [t("config.limitedUsers"), data.access?.limited_users]
+      ];
+      $("configGrid").innerHTML = rows.map(([label, value]) => configItem(label, value)).join("");
+      openDialog("configDialog");
     }
 
     async function toggleUser(u) {
