@@ -40,6 +40,9 @@ WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER") or os.getenv("ADMIN_USER") or os.ge
 WEB_ADMIN_PASS = os.getenv("WEB_ADMIN_PASS") or os.getenv("ADMIN_PASS") or os.getenv("XUI_ADMIN_PASS") or "admin"
 SESSION_SECRET = os.getenv("SESSION_SECRET") or WEB_ADMIN_PASS or BASIC_ADMIN_PASS or secrets.token_hex(16)
 DEFAULT_LANG = os.getenv("DEFAULT_LANG", "en")
+DEFAULT_THEME = os.getenv("DEFAULT_THEME", "light").lower()
+if DEFAULT_THEME not in {"light", "dark"}:
+    DEFAULT_THEME = "light"
 LOCALES_DIR = Path(os.getenv("LOCALES_DIR", "/app/locales"))
 SECRET_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -584,7 +587,7 @@ def api_i18n(lang: str) -> dict[str, Any]:
 
 LOGIN_PAGE = """
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="__DEFAULT_THEME__">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -650,6 +653,7 @@ LOGIN_PAGE = """
   </form>
   <script>
     const defaultLang = "__DEFAULT_LANG__";
+    const defaultTheme = "__DEFAULT_THEME__";
     const langSelect = document.getElementById("loginLangSelect");
     const themeSelect = document.getElementById("loginThemeSelect");
     let i18n = {};
@@ -674,7 +678,7 @@ LOGIN_PAGE = """
     }
     langSelect.onchange = () => loadI18n(langSelect.value);
     themeSelect.onchange = () => setTheme(themeSelect.value);
-    setTheme(localStorage.getItem("telemtAdmin.theme") || "light");
+    setTheme(localStorage.getItem("telemtAdmin.theme") || defaultTheme);
     loadI18n(localStorage.getItem("telemtAdmin.lang") || defaultLang).catch(() => {});
   </script>
 </body>
@@ -684,7 +688,12 @@ LOGIN_PAGE = """
 
 def render_login_page(error: bool = False) -> str:
     error_html = '<div class="error" data-i18n="login.invalid">Invalid username or password</div>' if error else ""
-    return LOGIN_PAGE.replace("__DEFAULT_LANG__", DEFAULT_LANG).replace("{error}", error_html)
+    return (
+        LOGIN_PAGE
+        .replace("__DEFAULT_LANG__", DEFAULT_LANG)
+        .replace("__DEFAULT_THEME__", DEFAULT_THEME)
+        .replace("{error}", error_html)
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -732,6 +741,7 @@ def render_index_page() -> str:
     return (
         PAGE
         .replace("__DEFAULT_LANG__", DEFAULT_LANG)
+        .replace("__DEFAULT_THEME__", DEFAULT_THEME)
         .replace("__WEB_AUTH_ENABLED__", "true" if ENABLE_WEB_AUTH else "false")
         .replace("__WEB_AUTH_HIDDEN__", "" if ENABLE_WEB_AUTH else "hidden")
     )
@@ -747,6 +757,7 @@ def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
         "domain": get_setting(text, "censorship", "tls_domain", "telemt.example.com"),
         "metrics": {"enabled": ENABLE_METRICS, "url": METRICS_URL, "available": metrics_available},
         "default_lang": DEFAULT_LANG,
+        "default_theme": DEFAULT_THEME,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -834,7 +845,7 @@ def index(
 
 PAGE = r"""
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="__DEFAULT_THEME__">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1169,7 +1180,7 @@ PAGE = r"""
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", metrics: { enabled: true, available: false, url: "" }, editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", theme: localStorage.getItem("telemtAdmin.theme") || "light", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", metrics: { enabled: true, available: false, url: "" }, editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
 
     function t(key, params = {}) {

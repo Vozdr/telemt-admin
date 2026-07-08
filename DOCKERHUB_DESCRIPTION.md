@@ -1,5 +1,7 @@
 # TeleMT Admin
 
+[English README](README.md) | [Русский README](README_ru.md) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin)
+
 Small web admin panel for [TeleMT](https://github.com/telemt/telemt) users.
 
 It edits `config.toml` directly, does not use a database, keeps rotating backups,
@@ -64,6 +66,7 @@ docker run -d \
   -e WEB_ADMIN_PASS=change-me \
   -e TELEMT_CONFIG=/data/telemt/config/config.toml \
   -e TELEMT_METRICS_URL=http://telemt:9090/metrics \
+  -e DEFAULT_THEME=light \
   -e TZ=UTC \
   -v /data/telemt/config:/data/telemt/config:rw \
   -v /data/telemt-admin/backups:/data/backups:rw \
@@ -97,6 +100,7 @@ services:
       TELEMT_CONFIG: /data/telemt/config/config.toml
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
+      DEFAULT_THEME: light
       TZ: UTC
     volumes:
       - /data/telemt/config:/data/telemt/config:rw
@@ -125,6 +129,7 @@ services:
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Value used when auto-fixing TeleMT `metrics_listen`. |
 | `AUTO_FIX_METRICS_LISTEN` | `yes` | Auto-rewrite `127.0.0.1:*`/`localhost:*` metrics listen in `config.toml`. |
 | `DEFAULT_LANG` | `en` | Default UI language. Supported: `en`, `ru`. |
+| `DEFAULT_THEME` | `light` | Default UI theme. Supported: `light`, `dark`. |
 | `LOCALES_DIR` | `/app/locales` | Directory with localization JSON files. |
 | `TZ` | image default | Timezone used for metadata timestamps. |
 
@@ -204,11 +209,12 @@ containers. In that fallback mode, set:
 TELEMT_METRICS_URL=http://127.0.0.1:9090/metrics
 ```
 
+
 ---
 
-# README_ru
-
 # TeleMT Admin
+
+[English README](README.md) | [Русский README](README_ru.md) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin)
 
 Небольшая веб-админка для управления пользователями [TeleMT](https://github.com/telemt/telemt).
 
@@ -273,6 +279,7 @@ docker run -d \
   -e WEB_ADMIN_PASS=change-me \
   -e TELEMT_CONFIG=/data/telemt/config/config.toml \
   -e TELEMT_METRICS_URL=http://telemt:9090/metrics \
+  -e DEFAULT_THEME=light \
   -e TZ=UTC \
   -v /data/telemt/config:/data/telemt/config:rw \
   -v /data/telemt-admin/backups:/data/backups:rw \
@@ -306,6 +313,7 @@ services:
       TELEMT_CONFIG: /data/telemt/config/config.toml
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
+      DEFAULT_THEME: light
       TZ: UTC
     volumes:
       - /data/telemt/config:/data/telemt/config:rw
@@ -333,6 +341,7 @@ services:
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Значение, которое используется при автоисправлении `metrics_listen`. |
 | `AUTO_FIX_METRICS_LISTEN` | `yes` | Автоматически меняет `127.0.0.1:*`/`localhost:*` в `metrics_listen` на значение выше. |
 | `DEFAULT_LANG` | `en` | Язык интерфейса по умолчанию. Поддерживаются `en`, `ru`. |
+| `DEFAULT_THEME` | `light` | Тема интерфейса по умолчанию. Поддерживаются `light`, `dark`. |
 | `LOCALES_DIR` | `/app/locales` | Каталог с JSON-файлами локализации. |
 | `TZ` | значение образа | Часовой пояс для метаданных пользователей. |
 
