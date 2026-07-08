@@ -1,7 +1,10 @@
 FROM python:3.12-alpine
 
+ARG TELEMT_ADMIN_VERSION=dev
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    TELEMT_ADMIN_VERSION=${TELEMT_ADMIN_VERSION} \
+    LOG_LEVEL=ERROR
 
 WORKDIR /app
 COPY requirements.txt /tmp/requirements.txt
@@ -9,4 +12,4 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 COPY app /app
 
 EXPOSE 8080
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["sh", "-c", "LOG_LEVEL_LOWER=$(printf '%s' \"${LOG_LEVEL:-ERROR}\" | tr '[:upper:]' '[:lower:]'); exec uvicorn main:app --host 0.0.0.0 --port 8080 --log-level \"$LOG_LEVEL_LOWER\" --no-access-log"]

@@ -67,6 +67,7 @@ docker run -d \
   -e TELEMT_CONFIG=/data/telemt/config/config.toml \
   -e TELEMT_METRICS_URL=http://telemt:9090/metrics \
   -e DEFAULT_THEME=light \
+  -e LOG_LEVEL=ERROR \
   -e TZ=UTC \
   -v /data/telemt/config:/data/telemt/config:rw \
   -v /data/telemt-admin/backups:/data/backups:rw \
@@ -101,6 +102,7 @@ services:
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
       DEFAULT_THEME: light
+      LOG_LEVEL: ERROR
       TZ: UTC
     volumes:
       - /data/telemt/config:/data/telemt/config:rw
@@ -128,9 +130,11 @@ services:
 | `TELEMT_METRICS_URL` | `http://telemt:9090/metrics` | Prometheus metrics URL. Use `http://127.0.0.1:9090/metrics` with `network_mode: container:telemt`. |
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Value used when auto-fixing TeleMT `metrics_listen`. |
 | `AUTO_FIX_METRICS_LISTEN` | `yes` | Auto-rewrite `127.0.0.1:*`/`localhost:*` metrics listen in `config.toml`. |
-| `DEFAULT_LANG` | `en` | Default UI language. Supported: `en`, `ru`. |
+| `DEFAULT_LANG` | `en` | Default UI language. Must match a JSON file name in `LOCALES_DIR` without `.json`. |
 | `DEFAULT_THEME` | `light` | Default UI theme. Supported: `light`, `dark`. |
 | `LOCALES_DIR` | `/app/locales` | Directory with localization JSON files. |
+| `LOG_LEVEL` | `ERROR` | Uvicorn log level. Access logs are disabled to avoid noisy request lines. |
+| `TELEMT_ADMIN_VERSION` | image value | Build version printed at container startup. Usually set by the Docker image. |
 | `TZ` | image default | Timezone used for metadata timestamps. |
 
 ## Authentication modes
@@ -161,8 +165,20 @@ Localization files live in:
 /app/locales/ru.json
 ```
 
-To add another language, add a new JSON file with the same keys and set
-`DEFAULT_LANG` to its file name without `.json`.
+To add another language, add a new JSON file with the same keys. The language
+selector is built automatically from `*.json` files in `LOCALES_DIR`.
+
+Recommended metadata keys:
+
+```json
+{
+  "language.name": "French",
+  "language.nativeName": "Français"
+}
+```
+
+Set `DEFAULT_LANG` to the file name without `.json` if the new language should
+be used by default.
 
 ## Security notes
 

@@ -28,6 +28,8 @@ from pydantic import BaseModel, Field
 CONFIG_PATH = Path(os.getenv("TELEMT_CONFIG", "/data/telemt/config/config.toml"))
 BACKUP_DIR = Path(os.getenv("TELEMT_BACKUP_DIR", "/data/backups"))
 MAX_BACKUPS = int(os.getenv("TELEMT_MAX_BACKUPS", "20"))
+APP_VERSION = os.getenv("TELEMT_ADMIN_VERSION", "dev")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "ERROR")
 ENABLE_METRICS = os.getenv("ENABLE_METRICS", "yes").lower() not in {"0", "false", "no", "off"}
 TELEMT_METRICS_LISTEN = os.getenv("TELEMT_METRICS_LISTEN", "0.0.0.0:9090")
 AUTO_FIX_METRICS_LISTEN = os.getenv("AUTO_FIX_METRICS_LISTEN", "yes").lower() not in {"0", "false", "no", "off"}
@@ -57,6 +59,7 @@ ASSIGN_RE = re.compile(
     r"^(?P<prefix>\s*)(?P<comment>#\s*)?(?P<key>[A-Za-z0-9_-]+)\s*=\s*"
     r"(?P<value>\"(?:[^\"\\]|\\.)*\"|[0-9]+)\s*(?P<trail>#.*)?$"
 )
+ASSIGN_ANY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+)\s*=\s*(?P<value>.+?)\s*(?:#.*)?$")
 
 
 app = FastAPI(title="TeleMT Admin")
@@ -208,9 +211,59 @@ def ensure_metrics_listen() -> None:
         write_config("\n".join(lines).rstrip() + "\n")
 
 
+def startup_config_lines() -> list[tuple[str, Any]]:
+    lines: list[tuple[str, Any]] = [
+        ("TELEMT_ADMIN_VERSION", APP_VERSION),
+        ("LOG_LEVEL", LOG_LEVEL),
+        ("TELEMT_CONFIG", str(CONFIG_PATH)),
+        ("TELEMT_BACKUP_DIR", str(BACKUP_DIR)),
+        ("TELEMT_MAX_BACKUPS", MAX_BACKUPS),
+        ("ENABLE_METRICS", ENABLE_METRICS),
+        ("TELEMT_METRICS_URL", METRICS_URL),
+        ("TELEMT_METRICS_LISTEN", TELEMT_METRICS_LISTEN),
+        ("AUTO_FIX_METRICS_LISTEN", AUTO_FIX_METRICS_LISTEN),
+        ("ENABLE_WEB_AUTH", ENABLE_WEB_AUTH),
+        ("WEB_ADMIN_USER", WEB_ADMIN_USER),
+        ("WEB_ADMIN_PASS", "<hidden>" if WEB_ADMIN_PASS else "<empty>"),
+        ("ENABLE_BASIC_AUTH", ENABLE_BASIC_AUTH),
+        ("BASIC_ADMIN_USER", BASIC_ADMIN_USER),
+        ("BASIC_ADMIN_PASS", "<hidden>" if BASIC_ADMIN_PASS else "<empty>"),
+        ("SESSION_SECRET", "<hidden>" if SESSION_SECRET else "<empty>"),
+        ("DEFAULT_LANG", DEFAULT_LANG),
+        ("DEFAULT_THEME", DEFAULT_THEME),
+        ("LOCALES_DIR", str(LOCALES_DIR)),
+        ("TZ", os.getenv("TZ", "")),
+    ]
+    if CONFIG_PATH.exists():
+        try:
+            info = telemt_config_info(CONFIG_PATH.read_text(encoding="utf-8"))
+            lines.extend(
+                [
+                    ("TELEMT_PUBLIC_ENDPOINT", info["endpoint"]),
+                    ("TELEMT_PUBLIC_HOST", info["public_host"]),
+                    ("TELEMT_PUBLIC_PORT", info["public_port"]),
+                    ("TELEMT_TLS_DOMAIN", info["censorship"].get("tls_domain", "")),
+                    ("TELEMT_SERVER_LISTEN", info["server"]["listen"]),
+                    ("TELEMT_METRICS_CONFIG_LISTEN", info["server"]["metrics_listen"]),
+                ]
+            )
+        except Exception as exc:
+            lines.append(("TELEMT_CONFIG_READ_ERROR", str(exc)))
+    else:
+        lines.append(("TELEMT_CONFIG_EXISTS", False))
+    return lines
+
+
+def print_startup_config() -> None:
+    print(f"TeleMT Admin {APP_VERSION} starting", flush=True)
+    for key, value in startup_config_lines():
+        print(f"TELEMT_ADMIN: {key}={value}", flush=True)
+
+
 @app.on_event("startup")
 def startup_checks() -> None:
     ensure_metrics_listen()
+    print_startup_config()
     if not ENABLE_BASIC_AUTH and not ENABLE_WEB_AUTH:
         print("WARNING: TeleMT Admin authentication is disabled. Do not expose it to untrusted networks.", flush=True)
     if ENABLE_BASIC_AUTH and BASIC_ADMIN_USER == "admin" and BASIC_ADMIN_PASS == "admin":
@@ -260,6 +313,37 @@ def parse_value(raw: str) -> str:
     if raw.startswith('"') and raw.endswith('"'):
         return bytes(raw[1:-1], "utf-8").decode("unicode_escape")
     return raw
+
+
+def parse_toml_scalar(raw: str) -> Any:
+    raw = raw.strip()
+    if raw.startswith('"') and raw.endswith('"'):
+        return bytes(raw[1:-1], "utf-8").decode("unicode_escape")
+    if raw in {"true", "false"}:
+        return raw == "true"
+    if raw.startswith("[") and raw.endswith("]"):
+        items = []
+        for item in raw[1:-1].split(","):
+            item = item.strip()
+            if item:
+                items.append(parse_toml_scalar(item))
+        return items
+    try:
+        return int(raw)
+    except ValueError:
+        return raw
+
+
+def parse_section_settings(lines: list[str], section: str) -> dict[str, Any]:
+    start, end = section_bounds(lines, section)
+    result: dict[str, Any] = {}
+    if start is None or end is None:
+        return result
+    for line in lines[start + 1 : end]:
+        m = ASSIGN_ANY_RE.match(line)
+        if m:
+            result[m.group("key")] = parse_toml_scalar(m.group("value"))
+    return result
 
 
 def parse_assignments(lines: list[str], section: str) -> dict[str, dict[str, Any]]:
@@ -358,20 +442,34 @@ def telemt_endpoint(host: str, port: int) -> str:
 def telemt_config_info(text: str) -> dict[str, Any]:
     host = telemt_public_host(text)
     port = telemt_public_port(text)
-    users = parse_assignments(text.splitlines(), "access.users")
-    limits = parse_assignments(text.splitlines(), "access.user_max_unique_ips")
+    lines = text.splitlines()
+    users = parse_assignments(lines, "access.users")
+    limits = parse_assignments(lines, "access.user_max_unique_ips")
     blocked = sum(1 for item in users.values() if item.get("blocked"))
+    general = parse_section_settings(lines, "general")
+    modes = parse_section_settings(lines, "general.modes")
+    server = parse_section_settings(lines, "server")
+    server_api = parse_section_settings(lines, "server.api")
+    censorship = parse_section_settings(lines, "censorship")
     return {
         "public_host": host,
         "public_port": port,
         "endpoint": telemt_endpoint(host, port),
         "server": {
-            "listen": get_setting(text, "server", "listen", ""),
-            "metrics_listen": get_setting(text, "server", "metrics_listen", ""),
+            "listen": server.get("listen", ""),
+            "metrics_listen": server.get("metrics_listen", ""),
         },
+        "general": {
+            "prefer_ipv6": general.get("prefer_ipv6", ""),
+            "fast_mode": general.get("fast_mode", ""),
+            "use_middle_proxy": general.get("use_middle_proxy", ""),
+        },
+        "modes": [name for name, enabled in modes.items() if enabled is True],
+        "server_api": server_api,
         "censorship": {
-            "tls_domain": get_setting(text, "censorship", "tls_domain", ""),
-            "mask_host": get_setting(text, "censorship", "mask_host", ""),
+            key: value
+            for key, value in censorship.items()
+            if not re.search(r"(secret|password|token|key)", key, re.IGNORECASE)
         },
         "access": {
             "users": len(users),
@@ -647,6 +745,34 @@ def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def available_locales() -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    if LOCALES_DIR.exists():
+        for path in sorted(LOCALES_DIR.glob("*.json")):
+            code = re.sub(r"[^a-zA-Z0-9_-]", "", path.stem)
+            if not code:
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+            result.append(
+                {
+                    "code": code,
+                    "name": str(data.get("language.name") or code),
+                    "native_name": str(data.get("language.nativeName") or data.get("language.name") or code),
+                }
+            )
+    if not result:
+        result.append({"code": "en", "name": "English", "native_name": "English"})
+    return result
+
+
+@app.get("/api/i18n")
+def api_i18n_list() -> dict[str, Any]:
+    return {"default": DEFAULT_LANG, "locales": available_locales()}
+
+
 @app.get("/api/i18n/{lang}")
 def api_i18n(lang: str) -> dict[str, Any]:
     lang = re.sub(r"[^a-zA-Z0-9_-]", "", lang) or DEFAULT_LANG
@@ -709,8 +835,7 @@ LOGIN_PAGE = """
 <body>
   <div class="top-controls">
     <select id="loginLangSelect" title="Language">
-      <option value="en">EN</option>
-      <option value="ru">RU</option>
+      <option value="__DEFAULT_LANG__">__DEFAULT_LANG__</option>
     </select>
     <select id="loginThemeSelect" data-i18n-title="theme.theme" title="Theme">
       <option value="light" data-i18n="theme.light">Light</option>
@@ -730,7 +855,23 @@ LOGIN_PAGE = """
     const langSelect = document.getElementById("loginLangSelect");
     const themeSelect = document.getElementById("loginThemeSelect");
     let i18n = {};
+    let locales = [];
     function t(key) { return i18n[key] || key; }
+    function esc(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+    async function loadLocales() {
+      const res = await fetch("api/i18n", { credentials: "same-origin" });
+      const data = await res.json();
+      locales = data.locales || [];
+      if (!locales.length) locales = [{ code: defaultLang, native_name: defaultLang }];
+      langSelect.innerHTML = locales.map(item => `<option value="${esc(item.code)}">${esc(item.native_name || item.name || item.code)}</option>`).join("");
+    }
+    function pickLang(lang) {
+      if (locales.some(item => item.code === lang)) return lang;
+      if (locales.some(item => item.code === defaultLang)) return defaultLang;
+      return locales[0]?.code || defaultLang;
+    }
     function applyI18n() {
       document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
       document.querySelectorAll("[data-i18n-title]").forEach(el => { el.title = t(el.dataset.i18nTitle); });
@@ -752,7 +893,11 @@ LOGIN_PAGE = """
     langSelect.onchange = () => loadI18n(langSelect.value);
     themeSelect.onchange = () => setTheme(themeSelect.value);
     setTheme(localStorage.getItem("telemtAdmin.theme") || defaultTheme);
-    loadI18n(localStorage.getItem("telemtAdmin.lang") || defaultLang).catch(() => {});
+    async function bootLogin() {
+      await loadLocales();
+      await loadI18n(pickLang(localStorage.getItem("telemtAdmin.lang") || defaultLang));
+    }
+    bootLogin().catch(() => {});
   </script>
 </body>
 </html>
@@ -1111,8 +1256,7 @@ PAGE = r"""
         <div class="lang-select">
           <span>🌐</span>
           <select id="langSelect" title="Language">
-            <option value="en">🇺🇸 EN</option>
-            <option value="ru">🇷🇺 RU</option>
+            <option value="__DEFAULT_LANG__">__DEFAULT_LANG__</option>
           </select>
         </div>
         <select id="themeSelect" data-i18n-title="theme.theme" title="Theme">
@@ -1284,7 +1428,7 @@ PAGE = r"""
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", config: null, metrics: { enabled: true, available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", config: null, metrics: { enabled: true, available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
 
     function t(key, params = {}) {
@@ -1293,6 +1437,20 @@ PAGE = r"""
         text = text.replace(`{${name}}`, value);
       }
       return text;
+    }
+
+    async function loadLocales() {
+      const res = await fetch("api/i18n", { credentials: "same-origin" });
+      const data = await res.json();
+      state.locales = data.locales || [];
+      if (!state.locales.length) state.locales = [{ code: "__DEFAULT_LANG__", native_name: "__DEFAULT_LANG__" }];
+      $("langSelect").innerHTML = state.locales.map(item => `<option value="${esc(item.code)}">${esc(item.native_name || item.name || item.code)}</option>`).join("");
+    }
+
+    function pickLang(lang) {
+      if (state.locales.some(item => item.code === lang)) return lang;
+      if (state.locales.some(item => item.code === "__DEFAULT_LANG__")) return "__DEFAULT_LANG__";
+      return state.locales[0]?.code || "__DEFAULT_LANG__";
     }
 
     async function loadI18n(lang) {
@@ -1653,21 +1811,37 @@ PAGE = r"""
     }
 
     function configItem(label, value) {
-      const display = value === "" || value === null || value === undefined ? "N/A" : value;
+      let display = value;
+      if (Array.isArray(display)) display = display.length ? display.join(", ") : "N/A";
+      if (typeof display === "boolean") display = display ? t("common.yes") : t("common.no");
+      if (display && typeof display === "object") display = JSON.stringify(display);
+      if (display === "" || display === null || display === undefined) display = "N/A";
       return `<div class="config-item"><span>${esc(label)}</span><code>${esc(display)}</code></div>`;
+    }
+
+    function configSectionItems(prefix, data, skip = []) {
+      return Object.entries(data || {})
+        .filter(([key]) => !skip.includes(key))
+        .map(([key, value]) => [t(prefix, { key }), value]);
     }
 
     async function showConfig() {
       const data = await request("api/telemt/config");
       state.config = data;
+      const apiEnabled = data.server_api?.enabled === true;
       const rows = [
         [t("config.publicEndpoint"), data.endpoint],
         [t("config.publicHost"), data.public_host],
         [t("config.publicPort"), data.public_port],
+        [t("config.activeModes"), data.modes && data.modes.length ? data.modes : t("common.off")],
+        [t("config.preferIpv6"), data.general?.prefer_ipv6],
+        [t("config.fastMode"), data.general?.fast_mode],
+        [t("config.useMiddleProxy"), data.general?.use_middle_proxy],
         [t("config.serverListen"), data.server?.listen],
         [t("config.metricsListen"), data.server?.metrics_listen],
-        [t("config.tlsDomain"), data.censorship?.tls_domain],
-        [t("config.maskHost"), data.censorship?.mask_host],
+        [t("config.serverApi"), apiEnabled ? t("common.on") : t("common.off")],
+        ...(apiEnabled ? configSectionItems("config.serverApiKey", data.server_api, ["enabled"]) : []),
+        ...configSectionItems("config.censorshipKey", data.censorship),
         [t("config.metricsUrl"), data.admin?.metrics_url],
         [t("config.metricsEnabled"), data.admin?.metrics_enabled ? t("common.yes") : t("common.no")],
         [t("config.autoFixMetrics"), data.admin?.auto_fix_metrics_listen ? t("common.yes") : t("common.no")],
@@ -1758,7 +1932,8 @@ PAGE = r"""
 
     async function boot() {
       setTheme(state.theme);
-      const preferred = state.lang || "__DEFAULT_LANG__";
+      await loadLocales();
+      const preferred = pickLang(state.lang || "__DEFAULT_LANG__");
       await loadI18n(preferred);
       restoreUiPrefs();
       await load();

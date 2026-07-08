@@ -66,6 +66,7 @@ docker run -d \
   -e TELEMT_CONFIG=/data/telemt/config/config.toml \
   -e TELEMT_METRICS_URL=http://telemt:9090/metrics \
   -e DEFAULT_THEME=light \
+  -e LOG_LEVEL=ERROR \
   -e TZ=UTC \
   -v /data/telemt/config:/data/telemt/config:rw \
   -v /data/telemt-admin/backups:/data/backups:rw \
@@ -100,6 +101,7 @@ services:
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
       DEFAULT_THEME: light
+      LOG_LEVEL: ERROR
       TZ: UTC
     volumes:
       - /data/telemt/config:/data/telemt/config:rw
@@ -126,9 +128,11 @@ services:
 | `TELEMT_METRICS_URL` | `http://telemt:9090/metrics` | URL Prometheus-метрик. Для `network_mode: container:telemt` используйте `http://127.0.0.1:9090/metrics`. |
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Значение, которое используется при автоисправлении `metrics_listen`. |
 | `AUTO_FIX_METRICS_LISTEN` | `yes` | Автоматически меняет `127.0.0.1:*`/`localhost:*` в `metrics_listen` на значение выше. |
-| `DEFAULT_LANG` | `en` | Язык интерфейса по умолчанию. Поддерживаются `en`, `ru`. |
+| `DEFAULT_LANG` | `en` | Язык интерфейса по умолчанию. Должен совпадать с именем JSON-файла в `LOCALES_DIR` без `.json`. |
 | `DEFAULT_THEME` | `light` | Тема интерфейса по умолчанию. Поддерживаются `light`, `dark`. |
 | `LOCALES_DIR` | `/app/locales` | Каталог с JSON-файлами локализации. |
+| `LOG_LEVEL` | `ERROR` | Уровень логирования Uvicorn. Access logs отключены, чтобы не писать строку на каждый запрос. |
+| `TELEMT_ADMIN_VERSION` | значение образа | Версия сборки, которая выводится при запуске контейнера. Обычно задаётся самим Docker-образом. |
 | `TZ` | значение образа | Часовой пояс для метаданных пользователей. |
 
 ## Режимы авторизации
@@ -159,8 +163,20 @@ Auth, затем web-форму входа.
 /app/locales/ru.json
 ```
 
-Чтобы добавить новый язык, создайте JSON-файл с теми же ключами и укажите его имя
-без `.json` в `DEFAULT_LANG`.
+Чтобы добавить новый язык, создайте JSON-файл с теми же ключами. Список языков
+строится автоматически из `*.json` файлов в `LOCALES_DIR`.
+
+Рекомендуемые метаданные:
+
+```json
+{
+  "language.name": "French",
+  "language.nativeName": "Français"
+}
+```
+
+Если новый язык должен использоваться по умолчанию, укажите имя файла без
+`.json` в `DEFAULT_LANG`.
 
 ## Безопасность
 
