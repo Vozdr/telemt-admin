@@ -1,6 +1,6 @@
 # TeleMT Admin
 
-[English README](README.md) | [Русский README](README_ru.md) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin)
+[English README](README.md) | [Русский README](README_ru.md) | [GitHub](https://github.com/Vozdr/telemt-admin) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin)
 
 Small web admin panel for [TeleMT](https://github.com/telemt/telemt) users.
 
@@ -137,6 +137,14 @@ services:
 | `TELEMT_ADMIN_VERSION` | image value | Build version printed at container startup. Usually set by the Docker image. |
 | `TZ` | image default | Timezone used for metadata timestamps. |
 
+`TZ` uses IANA timezone names, for example:
+
+```text
+TZ=Europe/Moscow
+TZ=Asia/Yekaterinburg
+TZ=UTC
+```
+
 ## Authentication modes
 
 Default mode is web login only:
@@ -187,6 +195,16 @@ be used by default.
 - Put the admin panel behind HTTPS.
 - Do not expose TeleMT metrics to the public internet.
 - Backups contain user secrets. Protect the backups directory.
+
+## Startup and health
+
+At startup, TeleMT Admin prints the effective non-secret settings, the build
+version, the GitHub URL, and read/write probes for `config.toml`.
+
+If `config.toml` cannot be read, `/healthz` returns an error so Docker can mark
+the container unhealthy. The process keeps running for troubleshooting. If the
+config is readable but not writable, the UI switches to read-only mode and write
+API endpoints return an error.
 
 ## Backup behavior
 

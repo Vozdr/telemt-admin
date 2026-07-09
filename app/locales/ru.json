@@ -6,6 +6,7 @@
   "app.domain": "Домен TeleMT",
   "app.metrics": "Метрики",
   "app.updated": "Обновлено",
+  "app.readOnly": "Режим только чтение",
   "metrics.on": "доступны",
   "metrics.off": "отключены",
   "metrics.down": "недоступны",

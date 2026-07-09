@@ -30,6 +30,7 @@ BACKUP_DIR = Path(os.getenv("TELEMT_BACKUP_DIR", "/data/backups"))
 MAX_BACKUPS = int(os.getenv("TELEMT_MAX_BACKUPS", "20"))
 APP_VERSION = os.getenv("TELEMT_ADMIN_VERSION", "dev")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "ERROR")
+GITHUB_URL = "https://github.com/Vozdr/telemt-admin/"
 ENABLE_METRICS = os.getenv("ENABLE_METRICS", "yes").lower() not in {"0", "false", "no", "off"}
 TELEMT_METRICS_LISTEN = os.getenv("TELEMT_METRICS_LISTEN", "0.0.0.0:9090")
 AUTO_FIX_METRICS_LISTEN = os.getenv("AUTO_FIX_METRICS_LISTEN", "yes").lower() not in {"0", "false", "no", "off"}
@@ -163,6 +164,29 @@ def read_config() -> str:
     return CONFIG_PATH.read_text(encoding="utf-8")
 
 
+def probe_config_read() -> tuple[bool, str]:
+    try:
+        CONFIG_PATH.read_text(encoding="utf-8")
+        return True, "OK"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def probe_config_write() -> tuple[bool, str]:
+    try:
+        with CONFIG_PATH.open("r+", encoding="utf-8"):
+            pass
+        return True, "OK"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def ensure_config_writable() -> None:
+    ok, detail = probe_config_write()
+    if not ok:
+        raise HTTPException(503, f"TeleMT config is read-only: {detail}")
+
+
 def make_backup() -> None:
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -223,47 +247,44 @@ def startup_config_lines() -> list[tuple[str, Any]]:
         ("TELEMT_METRICS_LISTEN", TELEMT_METRICS_LISTEN),
         ("AUTO_FIX_METRICS_LISTEN", AUTO_FIX_METRICS_LISTEN),
         ("ENABLE_WEB_AUTH", ENABLE_WEB_AUTH),
-        ("WEB_ADMIN_USER", WEB_ADMIN_USER),
-        ("WEB_ADMIN_PASS", "<hidden>" if WEB_ADMIN_PASS else "<empty>"),
         ("ENABLE_BASIC_AUTH", ENABLE_BASIC_AUTH),
-        ("BASIC_ADMIN_USER", BASIC_ADMIN_USER),
-        ("BASIC_ADMIN_PASS", "<hidden>" if BASIC_ADMIN_PASS else "<empty>"),
-        ("SESSION_SECRET", "<hidden>" if SESSION_SECRET else "<empty>"),
         ("DEFAULT_LANG", DEFAULT_LANG),
         ("DEFAULT_THEME", DEFAULT_THEME),
         ("LOCALES_DIR", str(LOCALES_DIR)),
         ("TZ", os.getenv("TZ", "")),
     ]
-    if CONFIG_PATH.exists():
-        try:
-            info = telemt_config_info(CONFIG_PATH.read_text(encoding="utf-8"))
-            lines.extend(
-                [
-                    ("TELEMT_PUBLIC_ENDPOINT", info["endpoint"]),
-                    ("TELEMT_PUBLIC_HOST", info["public_host"]),
-                    ("TELEMT_PUBLIC_PORT", info["public_port"]),
-                    ("TELEMT_TLS_DOMAIN", info["censorship"].get("tls_domain", "")),
-                    ("TELEMT_SERVER_LISTEN", info["server"]["listen"]),
-                    ("TELEMT_METRICS_CONFIG_LISTEN", info["server"]["metrics_listen"]),
-                ]
-            )
-        except Exception as exc:
-            lines.append(("TELEMT_CONFIG_READ_ERROR", str(exc)))
-    else:
-        lines.append(("TELEMT_CONFIG_EXISTS", False))
+    if ENABLE_WEB_AUTH:
+        lines.extend([("WEB_ADMIN_USER", WEB_ADMIN_USER), ("WEB_ADMIN_PASS", "<hidden>" if WEB_ADMIN_PASS else "<empty>")])
+    if ENABLE_BASIC_AUTH:
+        lines.extend([("BASIC_ADMIN_USER", BASIC_ADMIN_USER), ("BASIC_ADMIN_PASS", "<hidden>" if BASIC_ADMIN_PASS else "<empty>")])
+    if ENABLE_WEB_AUTH:
+        lines.append(("SESSION_SECRET", "<hidden>" if SESSION_SECRET else "<empty>"))
     return lines
 
 
 def print_startup_config() -> None:
     print(f"TeleMT Admin {APP_VERSION} starting", flush=True)
+    print(GITHUB_URL, flush=True)
     for key, value in startup_config_lines():
         print(f"TELEMT_ADMIN: {key}={value}", flush=True)
+    read_ok, read_detail = probe_config_read()
+    print(f"read config telemt - {'OK' if read_ok else 'Error!'}", flush=True)
+    if not read_ok:
+        print(f"read config telemt error: {read_detail}", flush=True)
+    write_ok, write_detail = probe_config_write()
+    print(f"write to config telemt - {'OK' if write_ok else 'Error!'}", flush=True)
+    if not write_ok:
+        print(f"write to config telemt error: {write_detail}", flush=True)
+        print("telemt admin working in read only mode", flush=True)
 
 
 @app.on_event("startup")
 def startup_checks() -> None:
-    ensure_metrics_listen()
     print_startup_config()
+    try:
+        ensure_metrics_listen()
+    except Exception as exc:
+        print(f"WARNING: failed to auto-fix TeleMT metrics listen: {exc}", flush=True)
     if not ENABLE_BASIC_AUTH and not ENABLE_WEB_AUTH:
         print("WARNING: TeleMT Admin authentication is disabled. Do not expose it to untrusted networks.", flush=True)
     if ENABLE_BASIC_AUTH and BASIC_ADMIN_USER == "admin" and BASIC_ADMIN_PASS == "admin":
@@ -742,7 +763,11 @@ def find_user(name: str) -> UserRecord:
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+    read_ok, read_detail = probe_config_read()
+    if not read_ok:
+        raise HTTPException(503, f"TeleMT config read failed: {read_detail}")
+    write_ok, _ = probe_config_write()
+    return {"status": "ok", "config": "rw" if write_ok else "ro"}
 
 
 def available_locales() -> list[dict[str, str]]:
@@ -971,12 +996,14 @@ def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
     users = list_users()
     metrics_available = any(user.stats.get("available") for user in users)
     config = telemt_config_info(text)
+    config_writable, _ = probe_config_write()
     return {
         "users": [u.__dict__ for u in users],
         "domain": config["endpoint"],
         "public_host": config["public_host"],
         "public_port": config["public_port"],
         "config": config,
+        "config_writable": config_writable,
         "metrics": {"enabled": ENABLE_METRICS, "url": METRICS_URL, "available": metrics_available},
         "default_lang": DEFAULT_LANG,
         "default_theme": DEFAULT_THEME,
@@ -1009,6 +1036,7 @@ def api_telemt_stats(_: None = Depends(require_auth)) -> dict[str, Any]:
 
 @app.post("/api/users")
 def api_create_user(data: UserInput, _: None = Depends(require_auth)) -> dict[str, Any]:
+    ensure_config_writable()
     if not data.secret:
         data.secret = generated_secret()
     upsert_user(data)
@@ -1017,12 +1045,14 @@ def api_create_user(data: UserInput, _: None = Depends(require_auth)) -> dict[st
 
 @app.put("/api/users/{name}")
 def api_update_user(name: str, data: UserInput, _: None = Depends(require_auth)) -> dict[str, Any]:
+    ensure_config_writable()
     upsert_user(data, old_name=name)
     return {"ok": True, "user": find_user(data.name).__dict__}
 
 
 @app.post("/api/users/{name}/secret")
 def api_rotate_secret(name: str, data: SecretInput, _: None = Depends(require_auth)) -> dict[str, Any]:
+    ensure_config_writable()
     user = find_user(name)
     new_secret = validate_secret(data.secret or generated_secret())
     upsert_user(UserInput(name=user.name, secret=new_secret, limit=user.limit, comment=user.comment, blocked=user.blocked), old_name=name)
@@ -1031,6 +1061,7 @@ def api_rotate_secret(name: str, data: SecretInput, _: None = Depends(require_au
 
 @app.post("/api/users/{name}/blocked")
 def api_toggle_user(name: str, data: ToggleInput, _: None = Depends(require_auth)) -> dict[str, Any]:
+    ensure_config_writable()
     user = find_user(name)
     upsert_user(UserInput(name=user.name, secret=user.secret, limit=user.limit, comment=user.comment, blocked=data.blocked), old_name=name)
     return {"ok": True, "user": find_user(name).__dict__}
@@ -1038,6 +1069,7 @@ def api_toggle_user(name: str, data: ToggleInput, _: None = Depends(require_auth
 
 @app.delete("/api/users/{name}")
 def api_delete_user(name: str, _: None = Depends(require_auth)) -> dict[str, bool]:
+    ensure_config_writable()
     validate_name(name)
     text = read_config()
     lines = text.splitlines()
@@ -1145,6 +1177,8 @@ PAGE = r"""
     button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
     button.primary:hover { background: var(--accent-dark); }
     button.danger { color: var(--danger); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button:disabled:hover { text-decoration: none; }
     button.icon, a.button-link.icon { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
     button.icon.large { width: 42px; height: 38px; font-size: 18px; }
     button.header-stat { width: 34px; height: 32px; border-radius: 7px; color: var(--accent-dark); background: var(--accent-soft); border-color: var(--line); font-size: 15px; }
@@ -1428,7 +1462,7 @@ PAGE = r"""
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", config: null, metrics: { enabled: true, available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", config: null, configWritable: true, metrics: { enabled: true, available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
 
     function t(key, params = {}) {
@@ -1513,13 +1547,16 @@ PAGE = r"""
       state.users = data.users;
       state.domain = data.domain;
       state.config = data.config || null;
+      state.configWritable = data.config_writable !== false;
       state.metrics = data.metrics || { enabled: true, available: false, url: "" };
       state.updatedAt = data.updated_at;
       const metricsText = !state.metrics.enabled ? t("metrics.off") : (state.metrics.available ? t("metrics.on") : t("metrics.down"));
-      $("subtitle").innerHTML = `${esc(t("app.domain"))}: <button type="button" id="configLink">${esc(data.domain)}</button>. ${esc(t("app.metrics"))}: ${esc(metricsText)}.`;
+      const modeText = state.configWritable ? "" : ` ${esc(t("app.readOnly"))}.`;
+      $("subtitle").innerHTML = `${esc(t("app.domain"))}: <button type="button" id="configLink">${esc(data.domain)}</button>. ${esc(t("app.metrics"))}: ${esc(metricsText)}.${modeText}`;
       $("configLink").onclick = showConfig;
       $("updatedAt").textContent = `${t("app.updated")}: ${formatFullDate(data.updated_at)}`;
       $("telemtStatsBtn").hidden = !state.metrics.enabled;
+      $("addBtn").disabled = !state.configWritable;
       render();
     }
 
@@ -1593,7 +1630,16 @@ PAGE = r"""
     function statLine(stats) {
       if (!state.metrics.enabled) return "—";
       if (!stats || !stats.available) return "N/A";
-      return `${formatNumber(stats.connections_current)} ${t("stats.activeShort")}<small>↑ ${formatBytes(stats.bytes_from_client)}/↓ ${formatBytes(stats.bytes_to_client)}</small>`;
+      return `${formatNumber(stats.connections_current)} ${t("stats.activeShort")}`;
+    }
+
+    function renderStatButton(button, stats) {
+      button.textContent = statLine(stats);
+      if (state.metrics.enabled && stats && stats.available) {
+        const small = document.createElement("small");
+        small.textContent = `↑ ${formatBytes(stats.bytes_from_client)}/↓ ${formatBytes(stats.bytes_to_client)}`;
+        button.appendChild(small);
+      }
     }
 
     function esc(value) {
@@ -1632,7 +1678,7 @@ PAGE = r"""
           <td><div class="status-cell"><button class="mini" title="${u.blocked ? t("status.enable") : t("status.disable")}" data-act="toggle">${u.blocked ? "▶" : "II"}</button><span class="pill ${u.blocked ? "off" : "ok"}">${u.blocked ? t("status.blocked") : t("status.active")}</span></div></td>`;
         tr.querySelector(".name").textContent = u.name;
         tr.querySelector(".comment").textContent = u.comment || "—";
-        tr.querySelector(".stat-button").innerHTML = statLine(u.stats);
+        renderStatButton(tr.querySelector(".stat-button"), u.stats);
         tr.querySelector(".date-cell").innerHTML = `<span class="date-help">${esc(formatDate(u.added_at))}<span class="tip">${esc(t("date.lastChanged"))}: ${esc(formatDate(u.updated_at))}</span></span>`;
         tr.querySelector("td:nth-child(5) .pill").textContent = u.limit > 0 ? `${u.limit} IP` : t("table.noLimit");
         if (u.blocked && u.blocked_at) {
@@ -1641,8 +1687,10 @@ PAGE = r"""
         tr.querySelector('[data-act="link"]').onclick = () => showLink(u);
         tr.querySelector('[data-act="stats"]').disabled = !state.metrics.enabled;
         tr.querySelector('[data-act="stats"]').onclick = () => state.metrics.enabled && showStats(u);
-        tr.querySelector('[data-act="edit"]').onclick = () => editUser(u);
-        tr.querySelector('[data-act="toggle"]').onclick = () => toggleUser(u);
+        tr.querySelector('[data-act="edit"]').disabled = !state.configWritable;
+        tr.querySelector('[data-act="edit"]').onclick = () => state.configWritable && editUser(u);
+        tr.querySelector('[data-act="toggle"]').disabled = !state.configWritable;
+        tr.querySelector('[data-act="toggle"]').onclick = () => state.configWritable && toggleUser(u);
         rows.appendChild(tr);
       }
     }
