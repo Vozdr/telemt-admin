@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import tomllib
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
@@ -159,15 +160,37 @@ class UserRecord:
     qr: str
 
 
+def validate_config_text(text: str) -> None:
+    if not text.strip():
+        raise ValueError("TeleMT config is empty")
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"TeleMT config is not valid TOML: {exc}") from exc
+    server = data.get("server")
+    if not isinstance(server, dict):
+        raise ValueError("TeleMT config does not contain [server]")
+    if "port" not in server and "listeners" not in server:
+        raise ValueError("TeleMT config does not contain server port/listeners")
+    if not any(isinstance(data.get(section), dict) for section in ("general", "censorship", "access")):
+        raise ValueError("TeleMT config does not contain expected TeleMT sections")
+
+
 def read_config() -> str:
     if not CONFIG_PATH.exists():
         raise HTTPException(500, f"Файл конфигурации не найден: {CONFIG_PATH}")
-    return CONFIG_PATH.read_text(encoding="utf-8")
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    try:
+        validate_config_text(text)
+    except ValueError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return text
 
 
 def probe_config_read() -> tuple[bool, str]:
     try:
-        CONFIG_PATH.read_text(encoding="utf-8")
+        text = CONFIG_PATH.read_text(encoding="utf-8")
+        validate_config_text(text)
         return True, "OK"
     except Exception as exc:
         return False, str(exc)
@@ -1431,7 +1454,7 @@ PAGE = r"""
       </div>
       <div class="modal-foot">
         <button type="button" class="danger" id="deleteBtn" hidden data-i18n="common.delete">Удалить</button>
-        <button type="button" data-close="editDialog" data-i18n="common.cancel">Отмена</button>
+        <button type="button" id="editCloseBtn" data-close="editDialog" data-i18n="common.cancel">Отмена</button>
         <button type="submit" class="primary" id="saveBtn" data-i18n="common.save">Сохранить</button>
       </div>
     </form>
@@ -1791,6 +1814,8 @@ PAGE = r"""
       $("genSecret").hidden = readonly;
       $("deleteBtn").hidden = readonly || !state.editing;
       $("saveBtn").hidden = readonly;
+      $("editCloseBtn").dataset.i18n = readonly ? "common.close" : "common.cancel";
+      $("editCloseBtn").textContent = readonly ? t("common.close") : t("common.cancel");
     }
 
     function editUser(u) {
