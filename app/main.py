@@ -1083,7 +1083,7 @@ def render_index_page() -> str:
         .replace("__METRICS_ENABLED__", "true" if ENABLE_METRICS else "false")
         .replace(
             "__METRICS_BUTTON__",
-            '<button type="button" class="header-stat" id="telemtStatsBtn" data-i18n-title="button.globalStats" title="Общая статистика TeleMT">▥</button>'
+            '<button type="button" class="qr-mini header-stat" id="telemtStatsBtn" data-i18n="button.globalStatsShort" data-i18n-title="button.globalStats" title="Общая статистика TeleMT" hidden>stat</button>'
             if ENABLE_METRICS
             else "",
         )
@@ -1291,11 +1291,11 @@ PAGE = r"""
     button:disabled:hover { text-decoration: none; }
     button.icon, a.button-link.icon { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
     button.icon.large { width: 42px; height: 38px; font-size: 18px; }
-    button.header-stat { width: 28px; height: 26px; padding: 0; display: inline-grid; place-items: center; border-radius: 6px; color: var(--accent-dark); background: var(--accent-soft); border-color: var(--line); font-size: 13px; line-height: 1; flex: 0 0 auto; }
+    button.header-stat { min-width: 40px; height: 20px; flex: 0 0 auto; transform: none; }
     button.header-stat:hover { background: var(--hover); border-color: var(--line-strong); }
     button.mini { width: 22px; height: 22px; padding: 0; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; }
     button.mini:hover { background: var(--hover); color: var(--accent-dark); border: 0; }
-    button.qr-mini { width: auto; min-width: 28px; height: 22px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--soft-2); color: var(--ink); font-size: 11px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
+    button.qr-mini { width: auto; min-width: 26px; height: 18px; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--soft-2); color: var(--ink); font-size: 10px; font-weight: 700; line-height: 16px; letter-spacing: .02em; text-transform: uppercase; transform: translateY(1px); }
     button.qr-mini:hover { background: var(--hover); border-color: var(--line-strong); color: var(--accent-dark); }
     select { height: 38px; border: 1px solid var(--line); border-radius: 7px; background: var(--control); color: var(--ink); padding: 0 10px; font: inherit; }
     .statusbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
@@ -1316,9 +1316,8 @@ PAGE = r"""
     th.sortable.sort-desc::after { content: "↓"; color: var(--accent); }
     tr:last-child td { border-bottom: 0; }
     tr.blocked { color: var(--muted); background: var(--blocked-bg); }
-    .name-row { display: flex; align-items: center; gap: 7px; min-width: 0; }
-    .name { border: 0; background: transparent; height: auto; padding: 0; color: var(--ink); font-weight: 700; overflow-wrap: anywhere; text-align: left; min-width: 0; }
-    .name:hover { color: var(--accent-dark); border: 0; text-decoration: underline; }
+    .name-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .name { color: var(--ink); font-weight: 700; overflow-wrap: anywhere; text-align: left; min-width: 0; }
     .comment { color: var(--muted); overflow-wrap: anywhere; max-width: 260px; line-height: 1.35; }
     .pill { display: inline-flex; align-items: center; height: 24px; border-radius: 999px; padding: 0 9px; font-size: 12px; border: 1px solid var(--line); background: var(--control); white-space: nowrap; }
     .pill small { display: block; font-size: 11px; line-height: 1.15; opacity: .78; }
@@ -1799,13 +1798,16 @@ PAGE = r"""
         const tr = document.createElement("tr");
         if (u.blocked) tr.className = "blocked";
         tr.innerHTML = `
-          <td><div class="name-row"><button class="name" data-act="edit"></button><button class="qr-mini" title="Показать QR и ссылку" data-act="link">qr</button></div></td>
+          <td><div class="name-row"><span class="name"></span><button class="qr-mini" data-act="edit"></button><button class="qr-mini" data-i18n-title="button.qr" title="Показать QR и ссылку" data-act="link">qr</button></div></td>
           <td><div class="comment"></div></td>
           <td class="stat-td"></td>
           <td><div class="date-cell"></div></td>
           <td><span class="pill"></span></td>
           <td><div class="status-cell"><button class="mini" title="${u.blocked ? t("status.enable") : t("status.disable")}" data-act="toggle">${u.blocked ? "▶" : "II"}</button><span class="pill ${u.blocked ? "off" : "ok"}">${u.blocked ? t("status.blocked") : t("status.active")}</span></div></td>`;
         tr.querySelector(".name").textContent = u.name;
+        const editBtn = tr.querySelector('[data-act="edit"]');
+        editBtn.textContent = state.configWritable ? t("button.editShort") : t("button.viewShort");
+        editBtn.title = state.configWritable ? t("button.edit") : t("modal.viewUser");
         tr.querySelector(".comment").textContent = u.comment || "—";
         const statsEl = renderStatCell(tr.querySelector(".stat-td"), u.stats);
         tr.querySelector(".date-cell").innerHTML = `<span class="date-help">${esc(formatDate(u.added_at))}<span class="tip">${esc(t("date.lastChanged"))}: ${esc(formatDate(u.updated_at))}</span></span>`;
@@ -1815,7 +1817,7 @@ PAGE = r"""
         }
         tr.querySelector('[data-act="link"]').onclick = () => showLink(u);
         if (state.metrics.enabled && state.metrics.available) statsEl.onclick = () => showStats(u);
-        tr.querySelector('[data-act="edit"]').onclick = () => editUser(u);
+        editBtn.onclick = () => editUser(u);
         const toggleBtn = tr.querySelector('[data-act="toggle"]');
         toggleBtn.hidden = !state.configWritable;
         toggleBtn.onclick = () => toggleUser(u);
