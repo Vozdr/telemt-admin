@@ -444,7 +444,7 @@ def telemt_public_host(text: str) -> str:
         get_top_level_setting(text, "public_host")
         or get_any_setting(text, "public_host")
         or get_setting(text, "censorship", "tls_domain")
-        or "telemt.example.com"
+        or ""
     )
 
 
@@ -457,6 +457,8 @@ def telemt_public_port(text: str) -> int:
 
 
 def telemt_endpoint(host: str, port: int) -> str:
+    if not host:
+        return ""
     return f"{host}:{port}"
 
 
@@ -747,10 +749,27 @@ def list_users() -> list[UserRecord]:
         limit = int(limit_item["value"]) if limit_item and str(limit_item["value"]).isdigit() else 0
         comment = u["comment"]
         secret = validate_secret(str(u["value"]))
-        link = make_link(secret, host, port, tls_domain)
+        link = make_link(secret, host, port, tls_domain) if host else ""
         stats = user_stats(metrics.get(name, {}))
         result.append(UserRecord(name, secret, limit, comment, blocked, u["added_at"], u["updated_at"], u["blocked_at"], stats, link, make_qr_data_uri(link)))
     return result
+
+
+def empty_users_payload(config_read_error: str) -> dict[str, Any]:
+    config_writable, _ = probe_config_write()
+    return {
+        "users": [],
+        "domain": "",
+        "public_host": "",
+        "public_port": 443,
+        "config": None,
+        "config_read_error": config_read_error,
+        "config_writable": config_writable,
+        "metrics": {"enabled": ENABLE_METRICS, "url": METRICS_URL, "available": False},
+        "default_lang": DEFAULT_LANG,
+        "default_theme": DEFAULT_THEME,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 def find_user(name: str) -> UserRecord:
@@ -992,7 +1011,10 @@ def render_index_page() -> str:
 
 @app.get("/api/users")
 def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
-    text = read_config()
+    try:
+        text = read_config()
+    except HTTPException as exc:
+        return empty_users_payload(str(exc.detail))
     users = list_users()
     metrics_available = any(user.stats.get("available") for user in users)
     config = telemt_config_info(text)
@@ -1013,7 +1035,10 @@ def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
 
 @app.get("/api/telemt/config")
 def api_telemt_config(_: None = Depends(require_auth)) -> dict[str, Any]:
-    return telemt_config_info(read_config())
+    try:
+        return telemt_config_info(read_config())
+    except HTTPException as exc:
+        return {"error": str(exc.detail), "endpoint": "", "public_host": "", "public_port": 443}
 
 
 @app.get("/api/users/{name}/stats")
@@ -1216,9 +1241,9 @@ PAGE = r"""
     .pill.off { height: auto; min-height: 30px; align-items: flex-start; flex-direction: column; justify-content: center; gap: 1px; color: var(--muted); background: var(--soft); white-space: normal; }
     .stat-cell { color: var(--muted); font-size: 13px; }
     td.stat-td { padding-top: 2px; padding-bottom: 2px; }
-    .stat-button { height: auto; min-height: 24px; border: 0; border-radius: 5px; background: transparent; padding: 2px 4px; color: var(--ink); font-size: 13px; line-height: 1.25; text-align: left; }
+    .stat-button { height: auto; min-height: 24px; border: 0; border-radius: 5px; background: transparent; padding: 2px 4px; color: var(--ink); font-size: 13px; line-height: 1.25; text-align: left; display: grid; justify-items: start; gap: 1px; }
     .stat-button:hover { background: var(--hover); border: 0; color: var(--accent-dark); }
-    .stat-button small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .stat-button small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; }
     .date-cell { color: var(--ink); font-size: 13px; line-height: 1.35; }
     .date-cell small { display: block; color: var(--muted); margin-top: 2px; }
     .date-help { position: relative; display: inline-flex; align-items: center; min-height: 22px; border-bottom: 1px dotted #9aa7b1; cursor: help; }
@@ -1552,8 +1577,12 @@ PAGE = r"""
       state.updatedAt = data.updated_at;
       const metricsText = !state.metrics.enabled ? t("metrics.off") : (state.metrics.available ? t("metrics.on") : t("metrics.down"));
       const modeText = state.configWritable ? "" : ` ${esc(t("app.readOnly"))}.`;
-      $("subtitle").innerHTML = `${esc(t("app.domain"))}: <button type="button" id="configLink">${esc(data.domain)}</button>. ${esc(t("app.metrics"))}: ${esc(metricsText)}.${modeText}`;
-      $("configLink").onclick = showConfig;
+      const domainHtml = data.domain
+        ? `<button type="button" id="configLink">${esc(data.domain)}</button>`
+        : `<span>${esc(t("common.na"))}</span>`;
+      const errorText = data.config_read_error ? ` ${esc(t("app.configReadError"))}.` : "";
+      $("subtitle").innerHTML = `${esc(t("app.domain"))}: ${domainHtml}. ${esc(t("app.metrics"))}: ${esc(metricsText)}.${modeText}${errorText}`;
+      if (data.domain) $("configLink").onclick = showConfig;
       $("updatedAt").textContent = `${t("app.updated")}: ${formatFullDate(data.updated_at)}`;
       $("telemtStatsBtn").hidden = !state.metrics.enabled;
       $("addBtn").disabled = !state.configWritable;

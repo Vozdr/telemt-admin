@@ -7,6 +7,7 @@
   "app.metrics": "Метрики",
   "app.updated": "Обновлено",
   "app.readOnly": "Режим только чтение",
+  "app.configReadError": "Конфиг TeleMT не читается",
   "metrics.on": "доступны",
   "metrics.off": "отключены",
   "metrics.down": "недоступны",

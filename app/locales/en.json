@@ -7,6 +7,7 @@
   "app.metrics": "Metrics",
   "app.updated": "Updated",
   "app.readOnly": "Read-only mode",
+  "app.configReadError": "TeleMT config is not readable",
   "metrics.on": "online",
   "metrics.off": "disabled",
   "metrics.down": "unavailable",
