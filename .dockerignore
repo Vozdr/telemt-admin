@@ -10,6 +10,7 @@ __pycache__/
 .gitignore
 
 backups/
+docs/
 *.bak
 *.bak.*
 *.log

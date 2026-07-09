@@ -12,7 +12,7 @@ import shutil
 import tomllib
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -45,9 +45,9 @@ WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER") or os.getenv("ADMIN_USER") or os.ge
 WEB_ADMIN_PASS = os.getenv("WEB_ADMIN_PASS") or os.getenv("ADMIN_PASS") or os.getenv("XUI_ADMIN_PASS") or "admin"
 SESSION_SECRET = os.getenv("SESSION_SECRET") or WEB_ADMIN_PASS or BASIC_ADMIN_PASS or secrets.token_hex(16)
 DEFAULT_LANG = os.getenv("DEFAULT_LANG", "en")
-DEFAULT_THEME = os.getenv("DEFAULT_THEME", "light").lower()
+DEFAULT_THEME = os.getenv("DEFAULT_THEME", "dark").lower()
 if DEFAULT_THEME not in {"light", "dark"}:
-    DEFAULT_THEME = "light"
+    DEFAULT_THEME = "dark"
 LOCALES_DIR = Path(os.getenv("LOCALES_DIR", "/app/locales"))
 SECRET_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -315,6 +315,9 @@ def print_startup_config() -> None:
         if not READ_ONLY:
             print(f"write to config telemt error: {write_detail}", flush=True)
         print("telemt admin working in read only mode", flush=True)
+    if ENABLE_METRICS:
+        _, _, _, metrics_available = read_metrics()
+        print(f"check metrics available - {'OK' if metrics_available else 'Error!'}", flush=True)
 
 
 @app.on_event("startup")
@@ -373,6 +376,32 @@ def parse_value(raw: str) -> str:
     if raw.startswith('"') and raw.endswith('"'):
         return bytes(raw[1:-1], "utf-8").decode("unicode_escape")
     return raw
+
+
+def configured_timezone() -> timezone | None:
+    raw = os.getenv("TZ", "").strip()
+    if not raw:
+        return None
+    if raw.upper() == "UTC":
+        return timezone.utc
+    match = re.fullmatch(r"UTC?([+-]\d{1,2})(?::?(\d{2}))?", raw, flags=re.IGNORECASE)
+    if not match:
+        match = re.fullmatch(r"([+-]\d{1,2})(?::?(\d{2}))?", raw)
+    if not match:
+        return None
+    hours = int(match.group(1))
+    minutes = int(match.group(2) or "0")
+    if abs(hours) > 23 or minutes > 59:
+        return None
+    sign = 1 if hours >= 0 else -1
+    return timezone(timedelta(hours=hours, minutes=sign * minutes), raw)
+
+
+def now_local() -> datetime:
+    tz = configured_timezone()
+    if tz is not None:
+        return datetime.now(tz)
+    return datetime.now().astimezone()
 
 
 def parse_toml_scalar(raw: str) -> Any:
@@ -585,14 +614,14 @@ def parse_labels(raw: str) -> dict[str, str]:
     return labels
 
 
-def read_metrics() -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], list[dict[str, Any]]]:
+def read_metrics() -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], list[dict[str, Any]], bool]:
     if not ENABLE_METRICS:
-        return {}, [], []
+        return {}, [], [], False
     try:
         with urllib.request.urlopen(METRICS_URL, timeout=3) as response:
             text = response.read().decode("utf-8", "replace")
     except Exception:
-        return {}, [], []
+        return {}, [], [], False
 
     per_user: dict[str, dict[str, float]] = {}
     raw_user: list[dict[str, Any]] = []
@@ -617,7 +646,7 @@ def read_metrics() -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], l
             raw_user.append(item)
         else:
             raw_global.append(item)
-    return per_user, raw_user, raw_global
+    return per_user, raw_user, raw_global, bool(raw_user or raw_global)
 
 
 def user_stats(metrics: dict[str, float]) -> dict[str, Any]:
@@ -753,7 +782,7 @@ def upsert_user(data: UserInput, old_name: str | None = None) -> None:
 
     if insert_at is None:
         _, insert_at = ensure_section(lines, "access.users")
-    now = datetime.now().astimezone().isoformat(timespec="seconds")
+    now = now_local().isoformat(timespec="seconds")
     added_at = source_item.get("added_at", "") if source_item else now
     updated_at = now if source_item else ""
     was_blocked = bool(source_item and source_item.get("blocked"))
@@ -779,7 +808,7 @@ def list_users() -> list[UserRecord]:
     lines = text.splitlines()
     users = parse_assignments(lines, "access.users")
     limits = parse_assignments(lines, "access.user_max_unique_ips")
-    metrics, _, _ = read_metrics()
+    metrics, _, _, metrics_available = read_metrics()
     result: list[UserRecord] = []
     for name in sorted(users):
         u = users[name]
@@ -789,7 +818,7 @@ def list_users() -> list[UserRecord]:
         comment = u["comment"]
         secret = validate_secret(str(u["value"]))
         link = make_link(secret, host, port, tls_domain) if host else ""
-        stats = user_stats(metrics.get(name, {}))
+        stats = user_stats(metrics.get(name, {})) if metrics_available else user_stats({})
         result.append(UserRecord(name, secret, limit, comment, blocked, u["added_at"], u["updated_at"], u["blocked_at"], stats, link, make_qr_data_uri(link)))
     return result
 
@@ -807,7 +836,7 @@ def empty_users_payload(config_read_error: str) -> dict[str, Any]:
         "metrics": {"enabled": ENABLE_METRICS, "url": METRICS_URL, "available": False},
         "default_lang": DEFAULT_LANG,
         "default_theme": DEFAULT_THEME,
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "updated_at": now_local().isoformat(timespec="seconds"),
     }
 
 
@@ -1068,7 +1097,7 @@ def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
     except HTTPException as exc:
         return empty_users_payload(str(exc.detail))
     users = list_users()
-    metrics_available = any(user.stats.get("available") for user in users)
+    _, _, _, metrics_available = read_metrics()
     config = telemt_config_info(text)
     config_writable, _ = probe_config_write()
     return {
@@ -1081,7 +1110,7 @@ def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
         "metrics": {"enabled": ENABLE_METRICS, "url": METRICS_URL, "available": metrics_available},
         "default_lang": DEFAULT_LANG,
         "default_theme": DEFAULT_THEME,
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "updated_at": now_local().isoformat(timespec="seconds"),
     }
 
 
@@ -1098,7 +1127,9 @@ def api_user_stats(name: str, _: None = Depends(require_auth)) -> dict[str, Any]
     user = find_user(name)
     if not ENABLE_METRICS:
         return {"user": user.name, "summary": user_stats({}), "metrics": []}
-    metrics, raw, _ = read_metrics()
+    metrics, raw, _, available = read_metrics()
+    if not available:
+        return {"user": user.name, "summary": user_stats({}), "metrics": []}
     rows = [item for item in raw if item["labels"].get("user") == name]
     return {"user": user.name, "summary": user_stats(metrics.get(name, {})), "metrics": rows}
 
@@ -1107,7 +1138,9 @@ def api_user_stats(name: str, _: None = Depends(require_auth)) -> dict[str, Any]
 def api_telemt_stats(_: None = Depends(require_auth)) -> dict[str, Any]:
     if not ENABLE_METRICS:
         return {"summary": global_stats([]), "metrics": []}
-    _, _, raw = read_metrics()
+    _, _, raw, available = read_metrics()
+    if not available:
+        return {"summary": global_stats([]), "metrics": []}
     return {"summary": global_stats(raw), "metrics": raw}
 
 
@@ -1238,7 +1271,7 @@ PAGE = r"""
     body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink); }
     .shell { max-width: 1180px; margin: 0 auto; padding: 26px 18px 42px; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-    .title-row { display: flex; align-items: center; gap: 10px; }
+    .title-row { display: flex; align-items: center; gap: 8px; }
     .top-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
     .lang-select { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     h1 { margin: 0; font-size: 26px; line-height: 1.1; letter-spacing: 0; }
@@ -1258,7 +1291,7 @@ PAGE = r"""
     button:disabled:hover { text-decoration: none; }
     button.icon, a.button-link.icon { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
     button.icon.large { width: 42px; height: 38px; font-size: 18px; }
-    button.header-stat { width: 34px; height: 32px; border-radius: 7px; color: var(--accent-dark); background: var(--accent-soft); border-color: var(--line); font-size: 15px; }
+    button.header-stat { width: 28px; height: 26px; padding: 0; display: inline-grid; place-items: center; border-radius: 6px; color: var(--accent-dark); background: var(--accent-soft); border-color: var(--line); font-size: 13px; line-height: 1; flex: 0 0 auto; }
     button.header-stat:hover { background: var(--hover); border-color: var(--line-strong); }
     button.mini { width: 22px; height: 22px; padding: 0; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; }
     button.mini:hover { background: var(--hover); color: var(--accent-dark); border: 0; }
@@ -1636,7 +1669,7 @@ PAGE = r"""
       $("subtitle").innerHTML = `${esc(t("app.domain"))}: ${domainHtml}. ${esc(t("app.metrics"))}: ${esc(metricsText)}.${modeText}${errorText}`;
       if (data.domain) $("configLink").onclick = showConfig;
       $("updatedAt").textContent = `${t("app.updated")}: ${formatFullDate(data.updated_at)}`;
-      if ($("telemtStatsBtn")) $("telemtStatsBtn").hidden = !state.metrics.enabled;
+      if ($("telemtStatsBtn")) $("telemtStatsBtn").hidden = !(state.metrics.enabled && state.metrics.available);
       $("addBtn").disabled = !state.configWritable;
       render();
     }
@@ -1709,7 +1742,7 @@ PAGE = r"""
     }
 
     function statLine(stats) {
-      if (!state.metrics.enabled) return "—";
+      if (!state.metrics.enabled || !state.metrics.available) return "—";
       if (!stats || !stats.available) return "N/A";
       return `${formatNumber(stats.connections_current)} ${t("stats.activeShort")}`;
     }
@@ -1725,10 +1758,11 @@ PAGE = r"""
 
     function renderStatCell(cell, stats) {
       cell.innerHTML = "";
-      const tag = state.metrics.enabled ? "button" : "div";
+      const active = state.metrics.enabled && state.metrics.available;
+      const tag = active ? "button" : "div";
       const el = document.createElement(tag);
-      el.className = state.metrics.enabled ? "stat-button" : "stat-text";
-      if (state.metrics.enabled) {
+      el.className = active ? "stat-button" : "stat-text";
+      if (active) {
         el.type = "button";
         el.dataset.act = "stats";
       }
@@ -1780,7 +1814,7 @@ PAGE = r"""
           tr.querySelector(".status-cell .pill").innerHTML = `${esc(t("status.blocked"))}<small>${esc(formatDate(u.blocked_at))}</small>`;
         }
         tr.querySelector('[data-act="link"]').onclick = () => showLink(u);
-        if (state.metrics.enabled) statsEl.onclick = () => showStats(u);
+        if (state.metrics.enabled && state.metrics.available) statsEl.onclick = () => showStats(u);
         tr.querySelector('[data-act="edit"]').onclick = () => editUser(u);
         const toggleBtn = tr.querySelector('[data-act="toggle"]');
         toggleBtn.hidden = !state.configWritable;
@@ -1901,6 +1935,7 @@ PAGE = r"""
     }
 
     async function showStats(u) {
+      if (!state.metrics.enabled || !state.metrics.available) return;
       stopStatsRefresh();
       state.statsUser = u.name;
       $("statsTitle").textContent = `${t("modal.userStats")}: ${u.name}`;
@@ -1958,6 +1993,7 @@ PAGE = r"""
     }
 
     async function showTelemtStats() {
+      if (!state.metrics.enabled || !state.metrics.available) return;
       stopTelemtStatsRefresh();
       $("telemtStatsUpdated").textContent = `${t("stats.updated")}...`;
       $("telemtStatsCards").innerHTML = `<div class="stat-card"><b>...</b><span>${esc(t("stats.loading"))}</span></div>`;

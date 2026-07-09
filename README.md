@@ -8,6 +8,14 @@ It edits `config.toml` directly, does not use a database, keeps rotating backups
 generates `tg://proxy` links and QR codes, and can show per-user and global
 TeleMT Prometheus metrics.
 
+## Screenshots
+
+![TeleMT Admin light overview](docs/screenshots/en-overview-light.png)
+
+![TeleMT Admin dark overview](docs/screenshots/en-overview-dark.png)
+
+![User statistics modal](docs/screenshots/en-user-stats-dark.png)
+
 ## Features
 
 - Add, edit, block/unblock and delete TeleMT users.
@@ -66,7 +74,7 @@ docker run -d \
   -e WEB_ADMIN_PASS=change-me \
   -e TELEMT_CONFIG=/data/telemt/config/config.toml \
   -e TELEMT_METRICS_URL=http://telemt:9090/metrics \
-  -e DEFAULT_THEME=light \
+  -e DEFAULT_THEME=dark \
   -e LOG_LEVEL=ERROR \
   -e TZ=UTC \
   -v /data/telemt/config:/data/telemt/config:rw \
@@ -102,7 +110,7 @@ services:
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
       READ_ONLY: "no"
-      DEFAULT_THEME: light
+      DEFAULT_THEME: dark
       LOG_LEVEL: ERROR
       TZ: UTC
     volumes:
@@ -133,18 +141,20 @@ services:
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Value used when auto-fixing TeleMT `metrics_listen`. |
 | `AUTO_FIX_METRICS_LISTEN` | `yes` | Auto-rewrite `127.0.0.1:*`/`localhost:*` metrics listen in `config.toml`. |
 | `DEFAULT_LANG` | `en` | Default UI language. Must match a JSON file name in `LOCALES_DIR` without `.json`. |
-| `DEFAULT_THEME` | `light` | Default UI theme. Supported: `light`, `dark`. |
+| `DEFAULT_THEME` | `dark` | Default UI theme. Supported: `light`, `dark`. |
 | `LOCALES_DIR` | `/app/locales` | Directory with localization JSON files. |
 | `LOG_LEVEL` | `ERROR` | Uvicorn log level. Access logs are disabled to avoid noisy request lines. |
 | `TELEMT_ADMIN_VERSION` | image value | Build version printed at container startup. Usually set by the Docker image. |
 | `TZ` | image default | Timezone used for metadata timestamps. |
 
-`TZ` uses IANA timezone names, for example:
+`TZ` uses IANA timezone names. For metadata timestamps, fixed UTC offsets are
+also supported in `+3`, `-5`, `+03:00` or `-05:30` format.
 
 ```text
 TZ=Europe/Moscow
-TZ=Asia/Yekaterinburg
 TZ=UTC
+TZ=+3
+TZ=-5
 ```
 
 ## Authentication modes

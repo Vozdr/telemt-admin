@@ -8,6 +8,14 @@
 резервные копии, генерирует `tg://proxy` ссылки и QR-коды, а также умеет показывать
 пользовательские и общие Prometheus-метрики TeleMT.
 
+## Скриншоты
+
+![Главный экран TeleMT Admin, светлая тема](docs/screenshots/ru-overview-light.png)
+
+![Главный экран TeleMT Admin, тёмная тема](docs/screenshots/ru-overview-dark.png)
+
+![Модальное окно статистики пользователя](docs/screenshots/ru-user-stats-dark.png)
+
 ## Возможности
 
 - Добавление, редактирование, блокировка/разблокировка и удаление пользователей TeleMT.
@@ -65,7 +73,7 @@ docker run -d \
   -e WEB_ADMIN_PASS=change-me \
   -e TELEMT_CONFIG=/data/telemt/config/config.toml \
   -e TELEMT_METRICS_URL=http://telemt:9090/metrics \
-  -e DEFAULT_THEME=light \
+  -e DEFAULT_THEME=dark \
   -e LOG_LEVEL=ERROR \
   -e TZ=UTC \
   -v /data/telemt/config:/data/telemt/config:rw \
@@ -101,7 +109,7 @@ services:
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
       READ_ONLY: "no"
-      DEFAULT_THEME: light
+      DEFAULT_THEME: dark
       LOG_LEVEL: ERROR
       TZ: UTC
     volumes:
@@ -131,18 +139,21 @@ services:
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Значение, которое используется при автоисправлении `metrics_listen`. |
 | `AUTO_FIX_METRICS_LISTEN` | `yes` | Автоматически меняет `127.0.0.1:*`/`localhost:*` в `metrics_listen` на значение выше. |
 | `DEFAULT_LANG` | `en` | Язык интерфейса по умолчанию. Должен совпадать с именем JSON-файла в `LOCALES_DIR` без `.json`. |
-| `DEFAULT_THEME` | `light` | Тема интерфейса по умолчанию. Поддерживаются `light`, `dark`. |
+| `DEFAULT_THEME` | `dark` | Тема интерфейса по умолчанию. Поддерживаются `light`, `dark`. |
 | `LOCALES_DIR` | `/app/locales` | Каталог с JSON-файлами локализации. |
 | `LOG_LEVEL` | `ERROR` | Уровень логирования Uvicorn. Access logs отключены, чтобы не писать строку на каждый запрос. |
 | `TELEMT_ADMIN_VERSION` | значение образа | Версия сборки, которая выводится при запуске контейнера. Обычно задаётся самим Docker-образом. |
 | `TZ` | значение образа | Часовой пояс для метаданных пользователей. |
 
-`TZ` задаётся в формате IANA timezone, например:
+`TZ` задаётся в формате IANA timezone. Для метаданных пользователей также
+поддерживаются фиксированные UTC-смещения в формате `+3`, `-5`, `+03:00` или
+`-05:30`.
 
 ```text
 TZ=Europe/Moscow
-TZ=Asia/Yekaterinburg
 TZ=UTC
+TZ=+3
+TZ=-5
 ```
 
 ## Режимы авторизации
