@@ -31,6 +31,7 @@ MAX_BACKUPS = int(os.getenv("TELEMT_MAX_BACKUPS", "20"))
 APP_VERSION = os.getenv("TELEMT_ADMIN_VERSION", "dev")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "ERROR")
 GITHUB_URL = "https://github.com/Vozdr/telemt-admin/"
+READ_ONLY = os.getenv("READ_ONLY", "no").lower() in {"1", "true", "yes", "on"}
 ENABLE_METRICS = os.getenv("ENABLE_METRICS", "yes").lower() not in {"0", "false", "no", "off"}
 TELEMT_METRICS_LISTEN = os.getenv("TELEMT_METRICS_LISTEN", "0.0.0.0:9090")
 AUTO_FIX_METRICS_LISTEN = os.getenv("AUTO_FIX_METRICS_LISTEN", "yes").lower() not in {"0", "false", "no", "off"}
@@ -173,6 +174,8 @@ def probe_config_read() -> tuple[bool, str]:
 
 
 def probe_config_write() -> tuple[bool, str]:
+    if READ_ONLY:
+        return False, "READ_ONLY is enabled"
     try:
         with CONFIG_PATH.open("r+", encoding="utf-8"):
             pass
@@ -242,10 +245,8 @@ def startup_config_lines() -> list[tuple[str, Any]]:
         ("TELEMT_CONFIG", str(CONFIG_PATH)),
         ("TELEMT_BACKUP_DIR", str(BACKUP_DIR)),
         ("TELEMT_MAX_BACKUPS", MAX_BACKUPS),
+        ("READ_ONLY", READ_ONLY),
         ("ENABLE_METRICS", ENABLE_METRICS),
-        ("TELEMT_METRICS_URL", METRICS_URL),
-        ("TELEMT_METRICS_LISTEN", TELEMT_METRICS_LISTEN),
-        ("AUTO_FIX_METRICS_LISTEN", AUTO_FIX_METRICS_LISTEN),
         ("ENABLE_WEB_AUTH", ENABLE_WEB_AUTH),
         ("ENABLE_BASIC_AUTH", ENABLE_BASIC_AUTH),
         ("DEFAULT_LANG", DEFAULT_LANG),
@@ -257,6 +258,14 @@ def startup_config_lines() -> list[tuple[str, Any]]:
         lines.extend([("WEB_ADMIN_USER", WEB_ADMIN_USER), ("WEB_ADMIN_PASS", "<hidden>" if WEB_ADMIN_PASS else "<empty>")])
     if ENABLE_BASIC_AUTH:
         lines.extend([("BASIC_ADMIN_USER", BASIC_ADMIN_USER), ("BASIC_ADMIN_PASS", "<hidden>" if BASIC_ADMIN_PASS else "<empty>")])
+    if ENABLE_METRICS:
+        lines.extend(
+            [
+                ("TELEMT_METRICS_URL", METRICS_URL),
+                ("TELEMT_METRICS_LISTEN", TELEMT_METRICS_LISTEN),
+                ("AUTO_FIX_METRICS_LISTEN", AUTO_FIX_METRICS_LISTEN),
+            ]
+        )
     if ENABLE_WEB_AUTH:
         lines.append(("SESSION_SECRET", "<hidden>" if SESSION_SECRET else "<empty>"))
     return lines
@@ -271,10 +280,17 @@ def print_startup_config() -> None:
     print(f"read config telemt - {'OK' if read_ok else 'Error!'}", flush=True)
     if not read_ok:
         print(f"read config telemt error: {read_detail}", flush=True)
+        print("write to config telemt - skipped (config is not readable)", flush=True)
+        print("telemt admin started in limited diagnostic mode", flush=True)
+        return
     write_ok, write_detail = probe_config_write()
-    print(f"write to config telemt - {'OK' if write_ok else 'Error!'}", flush=True)
+    if READ_ONLY:
+        print("write to config telemt - skipped (READ_ONLY=True)", flush=True)
+    else:
+        print(f"write to config telemt - {'OK' if write_ok else 'Error!'}", flush=True)
     if not write_ok:
-        print(f"write to config telemt error: {write_detail}", flush=True)
+        if not READ_ONLY:
+            print(f"write to config telemt error: {write_detail}", flush=True)
         print("telemt admin working in read only mode", flush=True)
 
 
@@ -1000,12 +1016,25 @@ def logout():
 
 
 def render_index_page() -> str:
+    page = PAGE
+    if not ENABLE_METRICS:
+        start = page.find('  <dialog id="statsDialog">')
+        end = page.find('  <dialog id="configDialog">')
+        if start != -1 and end != -1 and start < end:
+            page = page[:start] + page[end:]
     return (
-        PAGE
+        page
         .replace("__DEFAULT_LANG__", DEFAULT_LANG)
         .replace("__DEFAULT_THEME__", DEFAULT_THEME)
         .replace("__WEB_AUTH_ENABLED__", "true" if ENABLE_WEB_AUTH else "false")
         .replace("__WEB_AUTH_HIDDEN__", "" if ENABLE_WEB_AUTH else "hidden")
+        .replace("__METRICS_ENABLED__", "true" if ENABLE_METRICS else "false")
+        .replace(
+            "__METRICS_BUTTON__",
+            '<button type="button" class="header-stat" id="telemtStatsBtn" data-i18n-title="button.globalStats" title="Общая статистика TeleMT">▥</button>'
+            if ENABLE_METRICS
+            else "",
+        )
     )
 
 
@@ -1241,9 +1270,9 @@ PAGE = r"""
     .pill.off { height: auto; min-height: 30px; align-items: flex-start; flex-direction: column; justify-content: center; gap: 1px; color: var(--muted); background: var(--soft); white-space: normal; }
     .stat-cell { color: var(--muted); font-size: 13px; }
     td.stat-td { padding-top: 2px; padding-bottom: 2px; }
-    .stat-button { height: auto; min-height: 24px; border: 0; border-radius: 5px; background: transparent; padding: 2px 4px; color: var(--ink); font-size: 13px; line-height: 1.25; text-align: left; display: grid; justify-items: start; gap: 1px; }
+    .stat-button, .stat-text { height: auto; min-height: 24px; border: 0; border-radius: 5px; background: transparent; padding: 2px 4px; color: var(--ink); font-size: 13px; line-height: 1.25; text-align: left; display: grid; justify-items: start; gap: 1px; }
     .stat-button:hover { background: var(--hover); border: 0; color: var(--accent-dark); }
-    .stat-button small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .stat-button small, .stat-text small { display: block; color: var(--muted); font-size: 12px; white-space: nowrap; }
     .date-cell { color: var(--ink); font-size: 13px; line-height: 1.35; }
     .date-cell small { display: block; color: var(--muted); margin-top: 2px; }
     .date-help { position: relative; display: inline-flex; align-items: center; min-height: 22px; border-bottom: 1px dotted #9aa7b1; cursor: help; }
@@ -1307,7 +1336,7 @@ PAGE = r"""
       <div>
         <div class="title-row">
           <h1 data-i18n="app.title">TeleMT Admin</h1>
-          <button type="button" class="header-stat" id="telemtStatsBtn" data-i18n-title="button.globalStats" title="Общая статистика TeleMT">▥</button>
+          __METRICS_BUTTON__
         </div>
         <div class="subtitle" id="subtitle" data-i18n="app.loading">Загрузка пользователей...</div>
       </div>
@@ -1403,7 +1432,7 @@ PAGE = r"""
       <div class="modal-foot">
         <button type="button" class="danger" id="deleteBtn" hidden data-i18n="common.delete">Удалить</button>
         <button type="button" data-close="editDialog" data-i18n="common.cancel">Отмена</button>
-        <button type="submit" class="primary" data-i18n="common.save">Сохранить</button>
+        <button type="submit" class="primary" id="saveBtn" data-i18n="common.save">Сохранить</button>
       </div>
     </form>
   </dialog>
@@ -1487,7 +1516,7 @@ PAGE = r"""
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", config: null, configWritable: true, metrics: { enabled: true, available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", config: null, configWritable: true, metrics: { enabled: "__METRICS_ENABLED__" === "true", available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
 
     function t(key, params = {}) {
@@ -1576,7 +1605,7 @@ PAGE = r"""
       state.metrics = data.metrics || { enabled: true, available: false, url: "" };
       state.updatedAt = data.updated_at;
       const metricsText = !state.metrics.enabled ? t("metrics.off") : (state.metrics.available ? t("metrics.on") : t("metrics.down"));
-      const modeText = state.configWritable ? "" : ` ${esc(t("app.readOnly"))}.`;
+      const modeText = (!data.config_read_error && !state.configWritable) ? ` ${esc(t("app.readOnly"))}.` : "";
       const domainHtml = data.domain
         ? `<button type="button" id="configLink">${esc(data.domain)}</button>`
         : `<span>${esc(t("common.na"))}</span>`;
@@ -1584,7 +1613,7 @@ PAGE = r"""
       $("subtitle").innerHTML = `${esc(t("app.domain"))}: ${domainHtml}. ${esc(t("app.metrics"))}: ${esc(metricsText)}.${modeText}${errorText}`;
       if (data.domain) $("configLink").onclick = showConfig;
       $("updatedAt").textContent = `${t("app.updated")}: ${formatFullDate(data.updated_at)}`;
-      $("telemtStatsBtn").hidden = !state.metrics.enabled;
+      if ($("telemtStatsBtn")) $("telemtStatsBtn").hidden = !state.metrics.enabled;
       $("addBtn").disabled = !state.configWritable;
       render();
     }
@@ -1671,6 +1700,20 @@ PAGE = r"""
       }
     }
 
+    function renderStatCell(cell, stats) {
+      cell.innerHTML = "";
+      const tag = state.metrics.enabled ? "button" : "div";
+      const el = document.createElement(tag);
+      el.className = state.metrics.enabled ? "stat-button" : "stat-text";
+      if (state.metrics.enabled) {
+        el.type = "button";
+        el.dataset.act = "stats";
+      }
+      renderStatButton(el, stats);
+      cell.appendChild(el);
+      return el;
+    }
+
     function esc(value) {
       return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
@@ -1701,25 +1744,24 @@ PAGE = r"""
         tr.innerHTML = `
           <td><div class="name-row"><button class="name" data-act="edit"></button><button class="qr-mini" title="Показать QR и ссылку" data-act="link">qr</button></div></td>
           <td><div class="comment"></div></td>
-          <td class="stat-td"><button class="stat-button" data-act="stats"></button></td>
+          <td class="stat-td"></td>
           <td><div class="date-cell"></div></td>
           <td><span class="pill"></span></td>
           <td><div class="status-cell"><button class="mini" title="${u.blocked ? t("status.enable") : t("status.disable")}" data-act="toggle">${u.blocked ? "▶" : "II"}</button><span class="pill ${u.blocked ? "off" : "ok"}">${u.blocked ? t("status.blocked") : t("status.active")}</span></div></td>`;
         tr.querySelector(".name").textContent = u.name;
         tr.querySelector(".comment").textContent = u.comment || "—";
-        renderStatButton(tr.querySelector(".stat-button"), u.stats);
+        const statsEl = renderStatCell(tr.querySelector(".stat-td"), u.stats);
         tr.querySelector(".date-cell").innerHTML = `<span class="date-help">${esc(formatDate(u.added_at))}<span class="tip">${esc(t("date.lastChanged"))}: ${esc(formatDate(u.updated_at))}</span></span>`;
         tr.querySelector("td:nth-child(5) .pill").textContent = u.limit > 0 ? `${u.limit} IP` : t("table.noLimit");
         if (u.blocked && u.blocked_at) {
           tr.querySelector(".status-cell .pill").innerHTML = `${esc(t("status.blocked"))}<small>${esc(formatDate(u.blocked_at))}</small>`;
         }
         tr.querySelector('[data-act="link"]').onclick = () => showLink(u);
-        tr.querySelector('[data-act="stats"]').disabled = !state.metrics.enabled;
-        tr.querySelector('[data-act="stats"]').onclick = () => state.metrics.enabled && showStats(u);
-        tr.querySelector('[data-act="edit"]').disabled = !state.configWritable;
-        tr.querySelector('[data-act="edit"]').onclick = () => state.configWritable && editUser(u);
-        tr.querySelector('[data-act="toggle"]').disabled = !state.configWritable;
-        tr.querySelector('[data-act="toggle"]').onclick = () => state.configWritable && toggleUser(u);
+        if (state.metrics.enabled) statsEl.onclick = () => showStats(u);
+        tr.querySelector('[data-act="edit"]').onclick = () => editUser(u);
+        const toggleBtn = tr.querySelector('[data-act="toggle"]');
+        toggleBtn.hidden = !state.configWritable;
+        toggleBtn.onclick = () => toggleUser(u);
         rows.appendChild(tr);
       }
     }
@@ -1728,6 +1770,7 @@ PAGE = r"""
     function closeDialog(id) { $(id).close(); }
 
     function addUser() {
+      if (!state.configWritable) return;
       state.editing = null;
       $("editTitle").textContent = t("modal.addUser");
       $("deleteBtn").hidden = true;
@@ -1736,18 +1779,29 @@ PAGE = r"""
       $("secret").value = randomSecret();
       $("comment").value = "";
       $("blocked").checked = false;
+      setEditReadonly(false);
       openDialog("editDialog");
+    }
+
+    function setEditReadonly(readonly) {
+      ["name", "limit", "secret", "comment"].forEach(id => {
+        $(id).readOnly = readonly;
+      });
+      $("blocked").disabled = readonly;
+      $("genSecret").hidden = readonly;
+      $("deleteBtn").hidden = readonly || !state.editing;
+      $("saveBtn").hidden = readonly;
     }
 
     function editUser(u) {
       state.editing = u.name;
-      $("editTitle").textContent = `${t("modal.editUser")}: ${u.name}`;
-      $("deleteBtn").hidden = false;
+      $("editTitle").textContent = `${state.configWritable ? t("modal.editUser") : t("modal.viewUser")}: ${u.name}`;
       $("name").value = u.name;
       $("limit").value = u.limit;
       $("secret").value = u.secret;
       $("comment").value = u.comment || "";
       $("blocked").checked = u.blocked;
+      setEditReadonly(!state.configWritable);
       openDialog("editDialog");
     }
 
@@ -1763,6 +1817,7 @@ PAGE = r"""
 
     async function saveUser(ev) {
       ev.preventDefault();
+      if (!state.configWritable) return;
       const payload = formPayload();
       const url = state.editing ? `api/users/${encodeURIComponent(state.editing)}` : "api/users";
       const method = state.editing ? "PUT" : "POST";
@@ -1788,7 +1843,7 @@ PAGE = r"""
     function restartStatsRefresh() {
       if (state.statsTimer) clearInterval(state.statsTimer);
       state.statsTimer = null;
-      if (state.statsUser && $("statsDialog").open) {
+      if (state.statsUser && $("statsDialog") && $("statsDialog").open) {
         const interval = Number($("statsRefreshInterval").value || 5000);
         localStorage.setItem("telemtAdmin.userStatsInterval", String(interval));
         state.statsTimer = setInterval(() => refreshStatsModal(state.statsUser).catch(err => toast(err.message)), interval);
@@ -1797,7 +1852,7 @@ PAGE = r"""
 
     async function refreshStatsModal(name) {
       const data = await request(`api/users/${encodeURIComponent(name)}/stats`);
-      if (state.statsUser !== name || !$("statsDialog").open) return;
+      if (state.statsUser !== name || !$("statsDialog") || !$("statsDialog").open) return;
       const s = data.summary || {};
       $("statsUpdated").textContent = `${t("stats.updated")}: ${new Date().toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US")}`;
       const cards = [
@@ -1840,7 +1895,7 @@ PAGE = r"""
     function restartTelemtStatsRefresh() {
       if (state.telemtStatsTimer) clearInterval(state.telemtStatsTimer);
       state.telemtStatsTimer = null;
-      if ($("telemtStatsDialog").open) {
+      if ($("telemtStatsDialog") && $("telemtStatsDialog").open) {
         const interval = Number($("telemtStatsRefreshInterval").value || 5000);
         localStorage.setItem("telemtAdmin.globalStatsInterval", String(interval));
         state.telemtStatsTimer = setInterval(() => refreshTelemtStatsModal().catch(err => toast(err.message)), interval);
@@ -1849,7 +1904,7 @@ PAGE = r"""
 
     async function refreshTelemtStatsModal() {
       const data = await request("api/telemt/stats");
-      if (!$("telemtStatsDialog").open) return;
+      if (!$("telemtStatsDialog") || !$("telemtStatsDialog").open) return;
       const s = data.summary || {};
       $("telemtStatsUpdated").textContent = `${t("stats.updated")}: ${new Date().toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US")}`;
       const cards = [
@@ -1949,11 +2004,11 @@ PAGE = r"""
 
     $("addBtn").onclick = addUser;
     $("refreshBtn").onclick = load;
-    $("telemtStatsBtn").onclick = showTelemtStats;
-    $("statsRefreshBtn").onclick = () => state.statsUser && refreshStatsModal(state.statsUser).catch(err => toast(err.message));
-    $("telemtStatsRefreshBtn").onclick = () => refreshTelemtStatsModal().catch(err => toast(err.message));
-    $("statsRefreshInterval").onchange = restartStatsRefresh;
-    $("telemtStatsRefreshInterval").onchange = restartTelemtStatsRefresh;
+    if ($("telemtStatsBtn")) $("telemtStatsBtn").onclick = showTelemtStats;
+    if ($("statsRefreshBtn")) $("statsRefreshBtn").onclick = () => state.statsUser && refreshStatsModal(state.statsUser).catch(err => toast(err.message));
+    if ($("telemtStatsRefreshBtn")) $("telemtStatsRefreshBtn").onclick = () => refreshTelemtStatsModal().catch(err => toast(err.message));
+    if ($("statsRefreshInterval")) $("statsRefreshInterval").onchange = restartStatsRefresh;
+    if ($("telemtStatsRefreshInterval")) $("telemtStatsRefreshInterval").onchange = restartTelemtStatsRefresh;
     $("langSelect").onchange = () => loadI18n($("langSelect").value).then(load).catch(err => toast(err.message));
     $("themeSelect").onchange = () => setTheme($("themeSelect").value);
     $("refreshInterval").onchange = () => {
@@ -2001,8 +2056,8 @@ PAGE = r"""
     });
     function restoreUiPrefs() {
       $("refreshInterval").value = localStorage.getItem("telemtAdmin.tableInterval") || "0";
-      $("statsRefreshInterval").value = localStorage.getItem("telemtAdmin.userStatsInterval") || "5000";
-      $("telemtStatsRefreshInterval").value = localStorage.getItem("telemtAdmin.globalStatsInterval") || "5000";
+      if ($("statsRefreshInterval")) $("statsRefreshInterval").value = localStorage.getItem("telemtAdmin.userStatsInterval") || "5000";
+      if ($("telemtStatsRefreshInterval")) $("telemtStatsRefreshInterval").value = localStorage.getItem("telemtAdmin.globalStatsInterval") || "5000";
       $("logoutBtn").hidden = !state.webAuthEnabled;
       $("refreshInterval").dispatchEvent(new Event("change"));
     }

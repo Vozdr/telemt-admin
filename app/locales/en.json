@@ -53,6 +53,7 @@
   "common.error": "Request error",
   "modal.addUser": "Add user",
   "modal.editUser": "Edit",
+  "modal.viewUser": "View",
   "modal.link": "Link",
   "modal.userStats": "Stats",
   "modal.globalStats": "TeleMT global stats",

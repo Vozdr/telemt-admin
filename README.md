@@ -101,6 +101,7 @@ services:
       TELEMT_CONFIG: /data/telemt/config/config.toml
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
+      READ_ONLY: "no"
       DEFAULT_THEME: light
       LOG_LEVEL: ERROR
       TZ: UTC
@@ -126,6 +127,7 @@ services:
 | `TELEMT_CONFIG` | `/data/telemt/config/config.toml` | Path to TeleMT config inside the admin container. |
 | `TELEMT_BACKUP_DIR` | `/data/backups` | Directory for config backups. |
 | `TELEMT_MAX_BACKUPS` | `20` | Number of backups to keep. |
+| `READ_ONLY` | `no` | Forces read-only mode even when `config.toml` is writable. |
 | `ENABLE_METRICS` | `yes` | Enables metrics UI and metrics checks. Use `no` to hide metrics controls. |
 | `TELEMT_METRICS_URL` | `http://telemt:9090/metrics` | Prometheus metrics URL. Use `http://127.0.0.1:9090/metrics` with `network_mode: container:telemt`. |
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Value used when auto-fixing TeleMT `metrics_listen`. |

@@ -53,6 +53,7 @@
   "common.error": "Ошибка запроса",
   "modal.addUser": "Добавить пользователя",
   "modal.editUser": "Редактировать",
+  "modal.viewUser": "Просмотр",
   "modal.link": "Ссылка",
   "modal.userStats": "Статистика",
   "modal.globalStats": "Общая статистика TeleMT",

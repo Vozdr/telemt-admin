@@ -1,5 +1,11 @@
 # TeleMT Admin
 
+[GitHub](https://github.com/Vozdr/telemt-admin) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin) | [English README](https://github.com/Vozdr/telemt-admin/blob/main/README.md) | [Русский README](https://github.com/Vozdr/telemt-admin/blob/main/README_ru.md)
+
+---
+
+# TeleMT Admin
+
 [English README](https://github.com/Vozdr/telemt-admin/blob/main/README.md) | [Русский README](https://github.com/Vozdr/telemt-admin/blob/main/README_ru.md) | [GitHub](https://github.com/Vozdr/telemt-admin) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin)
 
 Small web admin panel for [TeleMT](https://github.com/telemt/telemt) users.
@@ -101,6 +107,7 @@ services:
       TELEMT_CONFIG: /data/telemt/config/config.toml
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
+      READ_ONLY: "no"
       DEFAULT_THEME: light
       LOG_LEVEL: ERROR
       TZ: UTC
@@ -126,6 +133,7 @@ services:
 | `TELEMT_CONFIG` | `/data/telemt/config/config.toml` | Path to TeleMT config inside the admin container. |
 | `TELEMT_BACKUP_DIR` | `/data/backups` | Directory for config backups. |
 | `TELEMT_MAX_BACKUPS` | `20` | Number of backups to keep. |
+| `READ_ONLY` | `no` | Forces read-only mode even when `config.toml` is writable. |
 | `ENABLE_METRICS` | `yes` | Enables metrics UI and metrics checks. Use `no` to hide metrics controls. |
 | `TELEMT_METRICS_URL` | `http://telemt:9090/metrics` | Prometheus metrics URL. Use `http://127.0.0.1:9090/metrics` with `network_mode: container:telemt`. |
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Value used when auto-fixing TeleMT `metrics_listen`. |
@@ -243,7 +251,6 @@ containers. In that fallback mode, set:
 TELEMT_METRICS_URL=http://127.0.0.1:9090/metrics
 ```
 
-
 ---
 
 # TeleMT Admin
@@ -348,6 +355,7 @@ services:
       TELEMT_CONFIG: /data/telemt/config/config.toml
       TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
       ENABLE_METRICS: "yes"
+      READ_ONLY: "no"
       DEFAULT_THEME: light
       LOG_LEVEL: ERROR
       TZ: UTC
@@ -372,6 +380,7 @@ services:
 | `TELEMT_CONFIG` | `/data/telemt/config/config.toml` | Путь к конфигу TeleMT внутри контейнера админки. |
 | `TELEMT_BACKUP_DIR` | `/data/backups` | Каталог для резервных копий конфига. |
 | `TELEMT_MAX_BACKUPS` | `20` | Количество резервных копий, которые нужно хранить. |
+| `READ_ONLY` | `no` | Принудительно включает режим только чтение, даже если `config.toml` доступен на запись. |
 | `ENABLE_METRICS` | `yes` | Включает метрики и проверки метрик. При `no` скрывает элементы статистики. |
 | `TELEMT_METRICS_URL` | `http://telemt:9090/metrics` | URL Prometheus-метрик. Для `network_mode: container:telemt` используйте `http://127.0.0.1:9090/metrics`. |
 | `TELEMT_METRICS_LISTEN` | `0.0.0.0:9090` | Значение, которое используется при автоисправлении `metrics_listen`. |
