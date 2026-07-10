@@ -1069,7 +1069,13 @@ def logout():
 
 def render_index_page() -> str:
     page = PAGE
-    if not ENABLE_METRICS:
+    metrics_ui_enabled = False
+    if ENABLE_METRICS:
+        try:
+            _, _, _, metrics_ui_enabled = read_metrics()
+        except Exception:
+            metrics_ui_enabled = False
+    if not metrics_ui_enabled:
         start = page.find('  <dialog id="statsDialog">')
         end = page.find('  <dialog id="configDialog">')
         if start != -1 and end != -1 and start < end:
@@ -1083,8 +1089,8 @@ def render_index_page() -> str:
         .replace("__METRICS_ENABLED__", "true" if ENABLE_METRICS else "false")
         .replace(
             "__METRICS_BUTTON__",
-            '<button type="button" class="qr-mini header-stat" id="telemtStatsBtn" data-i18n="button.globalStatsShort" data-i18n-title="button.globalStats" title="Общая статистика TeleMT" hidden>stat</button>'
-            if ENABLE_METRICS
+            '<button type="button" class="qr-mini header-stat" id="telemtStatsBtn" data-i18n="button.globalStatsShort" data-i18n-title="button.globalStats" title="Общая статистика TeleMT">stat</button>'
+            if metrics_ui_enabled
             else "",
         )
     )
@@ -1291,8 +1297,12 @@ PAGE = r"""
     button:disabled:hover { text-decoration: none; }
     button.icon, a.button-link.icon { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
     button.icon.large { width: 42px; height: 38px; font-size: 18px; }
-    button.header-stat { min-width: 40px; height: 20px; flex: 0 0 auto; transform: none; }
+    button.header-stat { min-width: 40px; height: 20px; flex: 0 0 auto; transform: translateY(2px); }
     button.header-stat:hover { background: var(--hover); border-color: var(--line-strong); }
+    button.busy { position: relative; color: transparent !important; pointer-events: none; }
+    button.busy::after { content: ""; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-bottom-color: transparent; border-radius: 50%; color: var(--ink); position: absolute; inset: 0; margin: auto; animation: spin .72s linear infinite; }
+    button.primary.busy::after { color: #fff; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     button.mini { width: 22px; height: 22px; padding: 0; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; }
     button.mini:hover { background: var(--hover); color: var(--accent-dark); border: 0; }
     button.qr-mini { width: auto; min-width: 26px; height: 18px; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--soft-2); color: var(--ink); font-size: 10px; font-weight: 700; line-height: 16px; letter-spacing: .02em; text-transform: uppercase; transform: translateY(1px); }
@@ -1571,7 +1581,7 @@ PAGE = r"""
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", config: null, configWritable: true, metrics: { enabled: "__METRICS_ENABLED__" === "true", available: false, url: "" }, updatedAt: "", editing: null, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", config: null, configWritable: true, metrics: { enabled: "__METRICS_ENABLED__" === "true", available: false, url: "" }, updatedAt: "", editing: null, editPending: false, loadingUsers: false, statsLoading: false, telemtStatsLoading: false, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
 
     function t(key, params = {}) {
@@ -1645,6 +1655,40 @@ PAGE = r"""
       return res.json();
     }
 
+    function setButtonBusy(button, busy) {
+      if (!button) return;
+      if (busy) {
+        button.dataset.wasDisabled = button.disabled ? "1" : "0";
+        button.disabled = true;
+        button.classList.add("busy");
+      } else {
+        button.classList.remove("busy");
+        button.disabled = button.dataset.wasDisabled === "1";
+        delete button.dataset.wasDisabled;
+      }
+    }
+
+    function setControlDisabled(control, disabled) {
+      if (!control) return;
+      if (disabled) {
+        control.dataset.wasDisabled = control.disabled ? "1" : "0";
+        control.disabled = true;
+      } else {
+        control.disabled = control.dataset.wasDisabled === "1";
+        delete control.dataset.wasDisabled;
+      }
+    }
+
+    function setEditPending(pending, activeButton) {
+      state.editPending = pending;
+      ["saveBtn", "deleteBtn", "editCloseBtn", "genSecret"].forEach(id => {
+        const el = $(id);
+        if (el === activeButton) setButtonBusy(el, pending);
+        else setControlDisabled(el, pending);
+      });
+      document.querySelectorAll('[data-close="editDialog"]:not(#editCloseBtn)').forEach(el => setControlDisabled(el, pending));
+    }
+
     function randomSecret() {
       const bytes = new Uint8Array(16);
       crypto.getRandomValues(bytes);
@@ -1652,25 +1696,33 @@ PAGE = r"""
     }
 
     async function load() {
-      const data = await request("api/users");
-      state.users = data.users;
-      state.domain = data.domain;
-      state.config = data.config || null;
-      state.configWritable = data.config_writable !== false;
-      state.metrics = data.metrics || { enabled: true, available: false, url: "" };
-      state.updatedAt = data.updated_at;
-      const metricsText = !state.metrics.enabled ? t("metrics.off") : (state.metrics.available ? t("metrics.on") : t("metrics.down"));
-      const modeText = (!data.config_read_error && !state.configWritable) ? ` ${esc(t("app.readOnly"))}.` : "";
-      const domainHtml = data.domain
-        ? `<button type="button" id="configLink">${esc(data.domain)}</button>`
-        : `<span>${esc(t("common.na"))}</span>`;
-      const errorText = data.config_read_error ? ` ${esc(t("app.configReadError"))}.` : "";
-      $("subtitle").innerHTML = `${esc(t("app.domain"))}: ${domainHtml}. ${esc(t("app.metrics"))}: ${esc(metricsText)}.${modeText}${errorText}`;
-      if (data.domain) $("configLink").onclick = showConfig;
-      $("updatedAt").textContent = `${t("app.updated")}: ${formatFullDate(data.updated_at)}`;
-      if ($("telemtStatsBtn")) $("telemtStatsBtn").hidden = !(state.metrics.enabled && state.metrics.available);
-      $("addBtn").disabled = !state.configWritable;
-      render();
+      if (state.loadingUsers) return;
+      state.loadingUsers = true;
+      setButtonBusy($("refreshBtn"), true);
+      try {
+        const data = await request("api/users");
+        state.users = data.users;
+        state.domain = data.domain;
+        state.config = data.config || null;
+        state.configWritable = data.config_writable !== false;
+        state.metrics = data.metrics || { enabled: true, available: false, url: "" };
+        state.updatedAt = data.updated_at;
+        const metricsText = !state.metrics.enabled ? t("metrics.off") : (state.metrics.available ? t("metrics.on") : t("metrics.down"));
+        const modeText = (!data.config_read_error && !state.configWritable) ? ` ${esc(t("app.readOnly"))}.` : "";
+        const domainHtml = data.domain
+          ? `<button type="button" id="configLink">${esc(data.domain)}</button>`
+          : `<span>${esc(t("common.na"))}</span>`;
+        const errorText = data.config_read_error ? ` ${esc(t("app.configReadError"))}.` : "";
+        $("subtitle").innerHTML = `${esc(t("app.domain"))}: ${domainHtml}. ${esc(t("app.metrics"))}: ${esc(metricsText)}.${modeText}${errorText}`;
+        if (data.domain) $("configLink").onclick = showConfig;
+        $("updatedAt").textContent = `${t("app.updated")}: ${formatFullDate(data.updated_at)}`;
+        if ($("telemtStatsBtn")) $("telemtStatsBtn").hidden = !(state.metrics.enabled && state.metrics.available);
+        $("addBtn").disabled = !state.configWritable;
+        render();
+      } finally {
+        setButtonBusy($("refreshBtn"), false);
+        state.loadingUsers = false;
+      }
     }
 
     function filteredUsers() {
@@ -1820,13 +1872,16 @@ PAGE = r"""
         editBtn.onclick = () => editUser(u);
         const toggleBtn = tr.querySelector('[data-act="toggle"]');
         toggleBtn.hidden = !state.configWritable;
-        toggleBtn.onclick = () => toggleUser(u);
+        toggleBtn.onclick = () => toggleUser(u, toggleBtn);
         rows.appendChild(tr);
       }
     }
 
     function openDialog(id) { $(id).showModal(); }
-    function closeDialog(id) { $(id).close(); }
+    function closeDialog(id, force = false) {
+      if (!force && id === "editDialog" && state.editPending) return;
+      $(id).close();
+    }
 
     function addUser() {
       if (!state.configWritable) return;
@@ -1882,10 +1937,17 @@ PAGE = r"""
       const payload = formPayload();
       const url = state.editing ? `api/users/${encodeURIComponent(state.editing)}` : "api/users";
       const method = state.editing ? "PUT" : "POST";
-      await request(url, { method, body: JSON.stringify(payload) });
-      closeDialog("editDialog");
-      toast(t("common.saved"));
-      await load();
+      setEditPending(true, $("saveBtn"));
+      try {
+        await request(url, { method, body: JSON.stringify(payload) });
+        closeDialog("editDialog", true);
+        toast(t("common.saved"));
+        await load();
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        setEditPending(false, $("saveBtn"));
+      }
     }
 
     function showLink(u) {
@@ -1907,7 +1969,7 @@ PAGE = r"""
       if (state.statsUser && $("statsDialog") && $("statsDialog").open) {
         const interval = Number($("statsRefreshInterval").value || 5000);
         localStorage.setItem("telemtAdmin.userStatsInterval", String(interval));
-        state.statsTimer = setInterval(() => refreshStatsModal(state.statsUser).catch(err => toast(err.message)), interval);
+        state.statsTimer = setInterval(() => refreshStatsModalBusy(state.statsUser).catch(err => toast(err.message)), interval);
       }
     }
 
@@ -1936,6 +1998,18 @@ PAGE = r"""
         .join("");
     }
 
+    async function refreshStatsModalBusy(name) {
+      if (state.statsLoading) return;
+      state.statsLoading = true;
+      setButtonBusy($("statsRefreshBtn"), true);
+      try {
+        await refreshStatsModal(name);
+      } finally {
+        setButtonBusy($("statsRefreshBtn"), false);
+        state.statsLoading = false;
+      }
+    }
+
     async function showStats(u) {
       if (!state.metrics.enabled || !state.metrics.available) return;
       stopStatsRefresh();
@@ -1945,7 +2019,7 @@ PAGE = r"""
       $("statsCards").innerHTML = `<div class="stat-card"><b>...</b><span>${esc(t("stats.loading"))}</span></div>`;
       $("statsMetrics").innerHTML = "";
       openDialog("statsDialog");
-      await refreshStatsModal(u.name);
+      await refreshStatsModalBusy(u.name);
       restartStatsRefresh();
     }
 
@@ -1960,7 +2034,7 @@ PAGE = r"""
       if ($("telemtStatsDialog") && $("telemtStatsDialog").open) {
         const interval = Number($("telemtStatsRefreshInterval").value || 5000);
         localStorage.setItem("telemtAdmin.globalStatsInterval", String(interval));
-        state.telemtStatsTimer = setInterval(() => refreshTelemtStatsModal().catch(err => toast(err.message)), interval);
+        state.telemtStatsTimer = setInterval(() => refreshTelemtStatsModalBusy().catch(err => toast(err.message)), interval);
       }
     }
 
@@ -1994,6 +2068,18 @@ PAGE = r"""
         .join("");
     }
 
+    async function refreshTelemtStatsModalBusy() {
+      if (state.telemtStatsLoading) return;
+      state.telemtStatsLoading = true;
+      setButtonBusy($("telemtStatsRefreshBtn"), true);
+      try {
+        await refreshTelemtStatsModal();
+      } finally {
+        setButtonBusy($("telemtStatsRefreshBtn"), false);
+        state.telemtStatsLoading = false;
+      }
+    }
+
     async function showTelemtStats() {
       if (!state.metrics.enabled || !state.metrics.available) return;
       stopTelemtStatsRefresh();
@@ -2001,7 +2087,7 @@ PAGE = r"""
       $("telemtStatsCards").innerHTML = `<div class="stat-card"><b>...</b><span>${esc(t("stats.loading"))}</span></div>`;
       $("telemtStatsMetrics").innerHTML = "";
       openDialog("telemtStatsDialog");
-      await refreshTelemtStatsModal();
+      await refreshTelemtStatsModalBusy();
       restartTelemtStatsRefresh();
     }
 
@@ -2048,28 +2134,42 @@ PAGE = r"""
       openDialog("configDialog");
     }
 
-    async function toggleUser(u) {
-      await request(`api/users/${encodeURIComponent(u.name)}/blocked`, {
-        method: "POST",
-        body: JSON.stringify({ blocked: !u.blocked })
-      });
-      toast(u.blocked ? t("toast.enabled") : t("toast.blocked"));
-      await load();
+    async function toggleUser(u, button) {
+      setButtonBusy(button, true);
+      try {
+        await request(`api/users/${encodeURIComponent(u.name)}/blocked`, {
+          method: "POST",
+          body: JSON.stringify({ blocked: !u.blocked })
+        });
+        toast(u.blocked ? t("toast.enabled") : t("toast.blocked"));
+        await load();
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        setButtonBusy(button, false);
+      }
     }
 
     async function deleteUser(u) {
       if (!confirm(t("confirm.delete", { name: u.name }))) return;
-      await request(`api/users/${encodeURIComponent(u.name)}`, { method: "DELETE" });
-      closeDialog("editDialog");
-      toast(t("common.deleted"));
-      await load();
+      setEditPending(true, $("deleteBtn"));
+      try {
+        await request(`api/users/${encodeURIComponent(u.name)}`, { method: "DELETE" });
+        closeDialog("editDialog", true);
+        toast(t("common.deleted"));
+        await load();
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        setEditPending(false, $("deleteBtn"));
+      }
     }
 
     $("addBtn").onclick = addUser;
-    $("refreshBtn").onclick = load;
+    $("refreshBtn").onclick = () => load().catch(err => toast(err.message));
     if ($("telemtStatsBtn")) $("telemtStatsBtn").onclick = showTelemtStats;
-    if ($("statsRefreshBtn")) $("statsRefreshBtn").onclick = () => state.statsUser && refreshStatsModal(state.statsUser).catch(err => toast(err.message));
-    if ($("telemtStatsRefreshBtn")) $("telemtStatsRefreshBtn").onclick = () => refreshTelemtStatsModal().catch(err => toast(err.message));
+    if ($("statsRefreshBtn")) $("statsRefreshBtn").onclick = () => state.statsUser && refreshStatsModalBusy(state.statsUser).catch(err => toast(err.message));
+    if ($("telemtStatsRefreshBtn")) $("telemtStatsRefreshBtn").onclick = () => refreshTelemtStatsModalBusy().catch(err => toast(err.message));
     if ($("statsRefreshInterval")) $("statsRefreshInterval").onchange = restartStatsRefresh;
     if ($("telemtStatsRefreshInterval")) $("telemtStatsRefreshInterval").onchange = restartTelemtStatsRefresh;
     $("langSelect").onchange = () => loadI18n($("langSelect").value).then(load).catch(err => toast(err.message));
@@ -2110,7 +2210,13 @@ PAGE = r"""
     });
     document.querySelectorAll("dialog").forEach(dialog => {
       dialog.addEventListener("click", (ev) => {
-        if (ev.target === dialog) dialog.close();
+        if (ev.target === dialog) {
+          if (dialog.id === "editDialog" && state.editPending) return;
+          dialog.close();
+        }
+      });
+      dialog.addEventListener("cancel", (ev) => {
+        if (dialog.id === "editDialog" && state.editPending) ev.preventDefault();
       });
       dialog.addEventListener("close", () => {
         if (dialog.id === "statsDialog") stopStatsRefresh();
