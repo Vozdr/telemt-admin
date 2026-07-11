@@ -3043,19 +3043,22 @@ PAGE = r"""
       const save = $("configSaveBtn");
       const reset = $("configResetBtn");
       if (save) {
-        save.disabled = state.configPending || !state.configWritable;
-        save.textContent = changed ? t("common.save") : t("common.close");
-        save.classList.toggle("primary", changed);
+        save.disabled = state.configPending || (changed && !state.configWritable);
+        save.textContent = changed && state.configWritable ? t("common.save") : t("common.close");
+        save.classList.toggle("primary", changed && state.configWritable);
       }
-      if (reset) reset.disabled = (!changed && !state.configPending) || !state.configWritable;
-      if (reset) reset.textContent = t("config.cancelChanges");
+      if (reset) {
+        reset.hidden = !state.configWritable;
+        reset.disabled = (!changed && !state.configPending) || !state.configWritable;
+        reset.textContent = t("config.cancelChanges");
+      }
       const warnings = [];
       if (changed && configChangesNeedRestart()) warnings.push(t("config.restartAfterSave"));
       if (changed && configChangesAffectLinks()) warnings.push(t("config.linksAfterSave"));
       const el = $("configWarnings");
       if (el) el.innerHTML = warnings.map(item => `<div>${esc(item)}</div>`).join("");
       const savebar = document.querySelector(".settings-savebar");
-      if (savebar) savebar.hidden = !state.configWritable;
+      if (savebar) savebar.hidden = false;
     }
 
     function settingValueDisplay(item) {
