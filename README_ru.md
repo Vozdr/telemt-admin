@@ -2,11 +2,12 @@
 
 [English README](https://github.com/Vozdr/telemt-admin/blob/main/README.md) | [Русский README](https://github.com/Vozdr/telemt-admin/blob/main/README_ru.md) | [GitHub](https://github.com/Vozdr/telemt-admin) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin)
 
-Небольшая веб-админка для управления пользователями [TeleMT](https://github.com/telemt/telemt).
+Небольшая веб-админка для [TeleMT](https://github.com/telemt/telemt).
 
-Она редактирует `config.toml` напрямую, не использует базу данных, хранит ротационные
-резервные копии, генерирует `tg://proxy` ссылки и QR-коды, а также умеет показывать
-пользовательские и общие Prometheus-метрики TeleMT.
+Позволяет изменять пользователей и системные настройки TeleMT напрямую в
+`config.toml`, хранит ротационные резервные копии, генерирует `tg://proxy`
+ссылки и QR-коды, а также умеет показывать пользовательские и общие
+Prometheus-метрики TeleMT.
 
 ## Скриншоты
 
@@ -20,6 +21,7 @@
 
 - Добавление, редактирование, блокировка/разблокировка и удаление пользователей TeleMT.
 - Настройка лимита уникальных IP для пользователя.
+- Просмотр и редактирование системных настроек TeleMT из `config.toml`.
 - Генерация ссылок и QR-кодов.
 - Просмотр пользовательских и общих метрик TeleMT.
 - Выбор языка интерфейса.
