@@ -2,11 +2,11 @@
 
 [English README](https://github.com/Vozdr/telemt-admin/blob/main/README.md) | [Русский README](https://github.com/Vozdr/telemt-admin/blob/main/README_ru.md) | [GitHub](https://github.com/Vozdr/telemt-admin) | [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin)
 
-Small web admin panel for [TeleMT](https://github.com/telemt/telemt) users.
+Small web admin panel for [TeleMT](https://github.com/telemt/telemt).
 
-It edits `config.toml` directly, does not use a database, keeps rotating backups,
-generates `tg://proxy` links and QR codes, and can show per-user and global
-TeleMT Prometheus metrics.
+It edits TeleMT users and system settings directly in `config.toml`, keeps
+rotating backups, generates `tg://proxy` links and QR codes, and can show
+per-user and global TeleMT Prometheus metrics.
 
 ## Screenshots
 
@@ -20,6 +20,7 @@ TeleMT Prometheus metrics.
 
 - Add, edit, block/unblock and delete TeleMT users.
 - Edit per-user unique IP limits.
+- View and edit TeleMT system settings from `config.toml`.
 - Generate proxy links and QR codes.
 - View user and global TeleMT metrics.
 - UI language selector.
