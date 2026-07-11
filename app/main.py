@@ -1827,10 +1827,13 @@ def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
 
 @app.get("/api/telemt/config")
 def api_telemt_config(_: None = Depends(require_auth)) -> dict[str, Any]:
+    config_writable, _ = probe_config_write()
     try:
-        return telemt_config_info(read_config())
+        result = telemt_config_info(read_config())
+        result["config_writable"] = config_writable
+        return result
     except HTTPException as exc:
-        return {"error": str(exc.detail), "endpoint": "", "public_host": "", "public_port": 443}
+        return {"error": str(exc.detail), "endpoint": "", "public_host": "", "public_port": 443, "config_writable": config_writable}
 
 
 @app.post("/api/telemt/config/settings")
@@ -2780,8 +2783,11 @@ PAGE = r"""
       });
       $("blocked").disabled = readonly;
       $("genSecret").hidden = readonly;
+      $("genSecret").disabled = readonly;
       $("deleteBtn").hidden = readonly || !state.editing;
+      $("deleteBtn").disabled = readonly;
       $("saveBtn").hidden = readonly;
+      $("saveBtn").disabled = readonly;
       $("editCloseBtn").dataset.i18n = readonly ? "common.close" : "common.cancel";
       $("editCloseBtn").textContent = readonly ? t("common.close") : t("common.cancel");
     }
@@ -3049,6 +3055,7 @@ PAGE = r"""
       }
       if (reset) {
         reset.hidden = !state.configWritable;
+        reset.style.display = state.configWritable ? "" : "none";
         reset.disabled = (!changed && !state.configPending) || !state.configWritable;
         reset.textContent = t("config.cancelChanges");
       }
@@ -3367,6 +3374,7 @@ PAGE = r"""
       try {
         const data = await request("api/telemt/config");
         state.config = data;
+        state.configWritable = data.config_writable !== false;
         updateConfigDocsLink();
         renderConfigSettings();
         $("configSettings").scrollTop = 0;
@@ -3507,7 +3515,10 @@ PAGE = r"""
       });
     });
     $("editForm").addEventListener("submit", saveUser);
-    $("genSecret").onclick = () => { $("secret").value = randomSecret(); };
+    $("genSecret").onclick = () => {
+      if (!state.configWritable || $("genSecret").disabled) return;
+      $("secret").value = randomSecret();
+    };
     $("deleteBtn").onclick = () => state.editing && deleteUser({ name: state.editing });
     $("copyBtn").onclick = async () => {
       await navigator.clipboard.writeText($("linkText").value);
