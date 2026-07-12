@@ -30,6 +30,8 @@ CONFIG_PATH = Path(os.getenv("TELEMT_CONFIG", "/data/telemt/config/config.toml")
 BACKUP_DIR = Path(os.getenv("TELEMT_BACKUP_DIR", "/data/backups"))
 MAX_BACKUPS = int(os.getenv("TELEMT_MAX_BACKUPS", "20"))
 APP_VERSION = os.getenv("TELEMT_ADMIN_VERSION", "dev")
+DEV_VERSION = os.getenv("TELEMT_ADMIN_DEV_VERSION", "1.2.0")
+DISPLAY_VERSION = f"{DEV_VERSION} dev" if APP_VERSION == "dev" else APP_VERSION
 LOG_LEVEL = os.getenv("LOG_LEVEL", "ERROR")
 GITHUB_URL = "https://github.com/Vozdr/telemt-admin/"
 READ_ONLY = os.getenv("READ_ONLY", "no").lower() in {"1", "true", "yes", "on"}
@@ -1788,7 +1790,7 @@ def render_index_page() -> str:
             page = page[:start] + page[end:]
     return (
         page
-        .replace("__APP_VERSION__", APP_VERSION)
+        .replace("__APP_VERSION__", DISPLAY_VERSION)
         .replace("__DEFAULT_LANG__", DEFAULT_LANG)
         .replace("__DEFAULT_THEME__", DEFAULT_THEME)
         .replace("__WEB_AUTH_ENABLED__", "true" if ENABLE_WEB_AUTH else "false")
@@ -2073,6 +2075,7 @@ PAGE = r"""
     th.sortable::after { content: "↕"; margin-left: 6px; color: #9aa7b1; font-size: 11px; }
     th.sortable.sort-asc::after { content: "↑"; color: var(--accent); }
     th.sortable.sort-desc::after { content: "↓"; color: var(--accent); }
+    th.sortable.sort-secondary::after { color: #9aa7b1; }
     tr:last-child td { border-bottom: 0; }
     tr.blocked { color: var(--muted); background: var(--blocked-bg); }
     .name-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -2428,7 +2431,7 @@ PAGE = r"""
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", config: null, configWritable: true, configShowAll: false, configSearch: "", configSections: [], configDraft: {}, configEditing: "", configPending: false, metrics: { enabled: "__METRICS_ENABLED__" === "true", available: false, url: "" }, updatedAt: "", editing: null, editPending: false, loadingUsers: false, statsLoading: false, telemtStatsLoading: false, filter: "all", sortKey: "added", sortDir: "desc", refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", config: null, configWritable: true, configShowAll: false, configSearch: "", configSections: [], configDraft: {}, configEditing: "", configPending: false, metrics: { enabled: "__METRICS_ENABLED__" === "true", available: false, url: "" }, updatedAt: "", editing: null, editPending: false, loadingUsers: false, statsLoading: false, telemtStatsLoading: false, filter: "all", sorts: [], refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
     let tipHideTimer = null;
     let tipActiveTarget = null;
@@ -2659,23 +2662,109 @@ PAGE = r"""
       return state.users;
     }
 
+    const SORT_KEYS = ["name", "comment", "stats", "added", "limit", "status"];
+
+    function defaultSorts() {
+      return [{ key: "added", dir: "desc" }];
+    }
+
+    function normalizeSorts(value) {
+      const seen = new Set();
+      const result = [];
+      const items = Array.isArray(value) ? value : [];
+      for (const item of items) {
+        const key = String(item && item.key || "");
+        const dir = item && item.dir === "desc" ? "desc" : "asc";
+        if (!SORT_KEYS.includes(key) || seen.has(key)) continue;
+        seen.add(key);
+        result.push({ key, dir });
+      }
+      return result;
+    }
+
+    function loadSorts() {
+      try {
+        const saved = normalizeSorts(JSON.parse(localStorage.getItem("telemtAdmin.sorts") || "null"));
+        state.sorts = saved.length ? saved : defaultSorts();
+      } catch {
+        state.sorts = defaultSorts();
+      }
+    }
+
+    function saveSorts() {
+      localStorage.setItem("telemtAdmin.sorts", JSON.stringify(state.sorts));
+    }
+
+    function cycleSort(key) {
+      const index = state.sorts.findIndex(item => item.key === key);
+      if (index === -1) {
+        state.sorts = [{ key, dir: "asc" }, ...state.sorts];
+      } else {
+        const current = state.sorts[index];
+        const rest = state.sorts.filter(item => item.key !== key);
+        if (current.dir === "asc") state.sorts = [{ key, dir: "desc" }, ...rest];
+        else state.sorts = rest;
+      }
+      saveSorts();
+    }
+
     function sortValue(u, key) {
       if (key === "name") return u.name.toLowerCase();
       if (key === "comment") return (u.comment || "").toLowerCase();
-      if (key === "stats") return "";
       if (key === "added") return u.added_at || "";
       if (key === "limit") return Number(u.limit || 0);
-      if (key === "status") return u.blocked ? 1 : 0;
       return "";
     }
 
+    function numberValue(value) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : 0;
+    }
+
+    function compareByStats(a, b, dir) {
+      const aAvailable = Boolean(a.stats && a.stats.available);
+      const bAvailable = Boolean(b.stats && b.stats.available);
+      if (aAvailable !== bAvailable) {
+        if (dir === 1) return aAvailable ? 1 : -1;
+        return aAvailable ? -1 : 1;
+      }
+      if (!aAvailable && !bAvailable) return a.name.localeCompare(b.name, "ru", { numeric: true, sensitivity: "base" });
+      const keys = ["connections_current", "bytes_from_client", "bytes_to_client"];
+      for (const key of keys) {
+        const diff = numberValue(a.stats[key]) - numberValue(b.stats[key]);
+        if (diff !== 0) return diff * dir;
+      }
+      return 0;
+    }
+
+    function compareByStatus(a, b, dir) {
+      if (a.blocked !== b.blocked) return a.blocked ? -1 : 1;
+      if (a.blocked && b.blocked) {
+        const av = Date.parse(a.blocked_at || "") || 0;
+        const bv = Date.parse(b.blocked_at || "") || 0;
+        if (av !== bv) return (av - bv) * dir;
+      }
+      return 0;
+    }
+
+    function compareByKey(a, b, key, dir) {
+      if (key === "stats") return compareByStats(a, b, dir);
+      if (key === "status") return compareByStatus(a, b, dir);
+      const av = sortValue(a, key);
+      const bv = sortValue(b, key);
+      if (typeof av === "number" || typeof bv === "number") return (Number(av) - Number(bv)) * dir;
+      return String(av).localeCompare(String(bv), "ru", { numeric: true, sensitivity: "base" }) * dir;
+    }
+
     function sortedUsers(users) {
-      const dir = state.sortDir === "asc" ? 1 : -1;
+      const sorts = Array.isArray(state.sorts) ? state.sorts : [];
       return [...users].sort((a, b) => {
-        const av = sortValue(a, state.sortKey);
-        const bv = sortValue(b, state.sortKey);
-        if (typeof av === "number" || typeof bv === "number") return (Number(av) - Number(bv)) * dir;
-        return String(av).localeCompare(String(bv), "ru", { numeric: true, sensitivity: "base" }) * dir;
+        for (const sort of sorts) {
+          const dir = sort.dir === "desc" ? -1 : 1;
+          const result = compareByKey(a, b, sort.key, dir);
+          if (result !== 0) return result;
+        }
+        return a.name.localeCompare(b.name, "ru", { numeric: true, sensitivity: "base" });
       });
     }
 
@@ -2769,8 +2858,11 @@ PAGE = r"""
         el.classList.toggle("active", el.dataset.filter === state.filter);
       });
       document.querySelectorAll("th.sortable").forEach(th => {
-        th.classList.toggle("sort-asc", th.dataset.sort === state.sortKey && state.sortDir === "asc");
-        th.classList.toggle("sort-desc", th.dataset.sort === state.sortKey && state.sortDir === "desc");
+        const index = state.sorts.findIndex(item => item.key === th.dataset.sort);
+        const sort = index >= 0 ? state.sorts[index] : null;
+        th.classList.toggle("sort-asc", Boolean(sort && sort.dir === "asc"));
+        th.classList.toggle("sort-desc", Boolean(sort && sort.dir === "desc"));
+        th.classList.toggle("sort-secondary", index > 0);
       });
 
       for (const u of visible) {
@@ -3561,13 +3653,7 @@ PAGE = r"""
     });
     document.querySelectorAll("th.sortable").forEach(th => {
       th.addEventListener("click", () => {
-        const key = th.dataset.sort;
-        if (state.sortKey === key) {
-          state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
-        } else {
-          state.sortKey = key;
-          state.sortDir = "asc";
-        }
+        cycleSort(th.dataset.sort);
         render();
       });
     });
@@ -3600,6 +3686,7 @@ PAGE = r"""
       });
     });
     function restoreUiPrefs() {
+      loadSorts();
       $("refreshInterval").value = localStorage.getItem("telemtAdmin.tableInterval") || "0";
       if ($("statsRefreshInterval")) $("statsRefreshInterval").value = localStorage.getItem("telemtAdmin.userStatsInterval") || "5000";
       if ($("telemtStatsRefreshInterval")) $("telemtStatsRefreshInterval").value = localStorage.getItem("telemtAdmin.globalStatsInterval") || "5000";
