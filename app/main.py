@@ -2136,6 +2136,7 @@ PAGE = r"""
     .settings-savebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
     .settings-warnings { display: grid; gap: 4px; color: var(--danger); font-size: 12px; font-weight: 700; }
     .settings-save-actions { display: flex; gap: 8px; margin-left: auto; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
     .settings-help { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; }
     .float-tip { position: fixed; z-index: 9999; max-width: min(420px, calc(100vw - 32px)); padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--tooltip-bg); color: var(--tooltip-ink); font-size: 12px; line-height: 1.35; box-shadow: 0 10px 28px rgba(15, 30, 42, .22); pointer-events: none; opacity: 0; transform: translateY(4px); transition: opacity .12s ease, transform .12s ease; white-space: normal; }
     .float-tip.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
@@ -2163,6 +2164,8 @@ PAGE = r"""
       .settings-badges, .settings-actions { justify-content: flex-start; }
       .settings-savebar { align-items: stretch; flex-direction: column; }
       .settings-save-actions { margin-left: 0; justify-content: flex-end; }
+      .modal-actions { justify-content: stretch; }
+      .modal-actions button { width: 100%; }
     }
   </style>
 </head>
@@ -2312,6 +2315,9 @@ PAGE = r"""
       </div>
       <div class="stats-grid" id="statsCards"></div>
       <div class="metric-list" id="statsMetrics"></div>
+      <div class="modal-actions">
+        <button type="button" data-close="statsDialog" data-i18n="common.close">Close</button>
+      </div>
     </div>
   </dialog>
 
@@ -2338,6 +2344,9 @@ PAGE = r"""
       </div>
       <div class="stats-grid" id="telemtStatsCards"></div>
       <div class="metric-list" id="telemtStatsMetrics"></div>
+      <div class="modal-actions">
+        <button type="button" data-close="telemtStatsDialog" data-i18n="common.close">Close</button>
+      </div>
     </div>
   </dialog>
 
@@ -2751,7 +2760,9 @@ PAGE = r"""
         editBtn.onclick = () => editUser(u);
         const toggleBtn = tr.querySelector('[data-act="toggle"]');
         toggleBtn.hidden = !state.configWritable;
-        toggleBtn.onclick = () => toggleUser(u, toggleBtn);
+        toggleBtn.style.display = state.configWritable ? "" : "none";
+        toggleBtn.disabled = !state.configWritable;
+        if (state.configWritable) toggleBtn.onclick = () => toggleUser(u, toggleBtn);
         rows.appendChild(tr);
       }
     }
