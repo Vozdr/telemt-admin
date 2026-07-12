@@ -2284,7 +2284,7 @@ PAGE = r"""
         <div class="grid">
           <div class="field">
             <label for="name" data-i18n="form.name">Имя</label>
-            <input id="name" name="name" autocomplete="off" required pattern="[A-Za-z0-9_-]{1,64}">
+            <input id="name" name="name" autocomplete="off" required pattern="[A-Za-z0-9_\-]{1,64}">
           </div>
           <div class="field">
             <label for="limit" data-i18n="form.limit">Лимит IP</label>
