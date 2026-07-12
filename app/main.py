@@ -2783,10 +2783,13 @@ PAGE = r"""
       });
       $("blocked").disabled = readonly;
       $("genSecret").hidden = readonly;
+      $("genSecret").style.display = readonly ? "none" : "";
       $("genSecret").disabled = readonly;
       $("deleteBtn").hidden = readonly || !state.editing;
+      $("deleteBtn").style.display = readonly || !state.editing ? "none" : "";
       $("deleteBtn").disabled = readonly;
       $("saveBtn").hidden = readonly;
+      $("saveBtn").style.display = readonly ? "none" : "";
       $("saveBtn").disabled = readonly;
       $("editCloseBtn").dataset.i18n = readonly ? "common.close" : "common.cancel";
       $("editCloseBtn").textContent = readonly ? t("common.close") : t("common.cancel");
@@ -3362,12 +3365,14 @@ PAGE = r"""
       state.configDraft = {};
       state.configEditing = "";
       state.configPending = false;
+      state.configWritable = false;
       state.config = { settings: [] };
       $("configSettingsCount").textContent = "";
       $("configSearch").value = "";
       $("configSectionValue").innerHTML = `<span class="multi-placeholder">${esc(t("config.allSections"))}</span>`;
       $("configSectionMenu").innerHTML = "";
       $("configSettings").innerHTML = `<div class="empty">${esc(t("stats.loading"))}...</div>`;
+      updateConfigSaveState();
       updateConfigDocsLink();
       openDialog("configDialog");
       $("configSettings").scrollTop = 0;
