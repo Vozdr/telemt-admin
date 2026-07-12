@@ -1775,7 +1775,7 @@ def logout():
 def render_index_page() -> str:
     page = PAGE
     metrics_ui_enabled = False
-    read_only_ui = READ_ONLY
+    read_only_ui = READ_ONLY or not probe_config_write()[0]
     if ENABLE_METRICS:
         try:
             _, _, _, metrics_ui_enabled = read_metrics()
@@ -1788,6 +1788,7 @@ def render_index_page() -> str:
             page = page[:start] + page[end:]
     return (
         page
+        .replace("__APP_VERSION__", APP_VERSION)
         .replace("__DEFAULT_LANG__", DEFAULT_LANG)
         .replace("__DEFAULT_THEME__", DEFAULT_THEME)
         .replace("__WEB_AUTH_ENABLED__", "true" if ENABLE_WEB_AUTH else "false")
@@ -2033,6 +2034,9 @@ PAGE = r"""
     .toolbar-side { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .toolbar-stack { display: grid; gap: 6px; justify-items: end; }
     .toolbar-updated { color: var(--muted); font-size: 12px; min-height: 16px; }
+    .app-footer { margin-top: 18px; text-align: right; color: var(--muted); font-size: 12px; }
+    .app-footer a { color: var(--muted); text-decoration: none; }
+    .app-footer a:hover { color: var(--accent-dark); text-decoration: underline; }
     button, a.button-link { height: 38px; border: 1px solid var(--line); border-radius: 7px; background: var(--control); color: var(--ink); padding: 0 12px; font: inherit; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
     button:hover, a.button-link:hover { border-color: var(--line-strong); }
     button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -2267,6 +2271,7 @@ PAGE = r"""
         <div class="toolbar-updated" id="updatedAt"></div>
       </div>
     </div>
+    <div class="app-footer"><a href="https://github.com/Vozdr/telemt-admin/" target="_blank" rel="noopener noreferrer">TeleMT Admin __APP_VERSION__</a></div>
   </div>
 
   <dialog id="editDialog">
@@ -2320,9 +2325,9 @@ PAGE = r"""
           <button type="button" id="copyBtn" data-i18n="common.copy">Скопировать</button>
         </div>
       </div>
-    </div>
-    <div class="modal-actions">
-      <button type="button" data-close="linkDialog" data-i18n="common.close">Close</button>
+      <div class="modal-actions">
+        <button type="button" data-close="linkDialog" data-i18n="common.close">Close</button>
+      </div>
     </div>
   </dialog>
 
