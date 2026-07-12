@@ -1775,6 +1775,7 @@ def logout():
 def render_index_page() -> str:
     page = PAGE
     metrics_ui_enabled = False
+    read_only_ui = READ_ONLY
     if ENABLE_METRICS:
         try:
             _, _, _, metrics_ui_enabled = read_metrics()
@@ -1792,6 +1793,36 @@ def render_index_page() -> str:
         .replace("__WEB_AUTH_ENABLED__", "true" if ENABLE_WEB_AUTH else "false")
         .replace("__WEB_AUTH_HIDDEN__", "" if ENABLE_WEB_AUTH else "hidden")
         .replace("__METRICS_ENABLED__", "true" if ENABLE_METRICS else "false")
+        .replace(
+            "__USER_TOGGLE_BUTTON__",
+            "" if read_only_ui else '<button class="mini" title="${u.blocked ? t("status.enable") : t("status.disable")}" data-act="toggle">${u.blocked ? "▶" : "II"}</button>',
+        )
+        .replace(
+            "__USER_TOGGLE_BINDING__",
+            "" if read_only_ui else """const toggleBtn = tr.querySelector('[data-act="toggle"]');
+        if (toggleBtn) {
+          toggleBtn.hidden = !state.configWritable;
+          toggleBtn.style.display = state.configWritable ? "" : "none";
+          toggleBtn.disabled = !state.configWritable;
+          if (state.configWritable) toggleBtn.onclick = () => toggleUser(u, toggleBtn);
+        }""",
+        )
+        .replace(
+            "__USER_GEN_SECRET_BUTTON__",
+            "" if read_only_ui else '<button type="button" id="genSecret" data-i18n="form.generate">Сгенерировать</button>',
+        )
+        .replace(
+            "__USER_DELETE_BUTTON__",
+            "" if read_only_ui else '<button type="button" class="danger" id="deleteBtn" hidden data-i18n="common.delete">Удалить</button>',
+        )
+        .replace(
+            "__USER_SAVE_BUTTON__",
+            "" if read_only_ui else '<button type="submit" class="primary" id="saveBtn" data-i18n="common.save">Сохранить</button>',
+        )
+        .replace(
+            "__CONFIG_RESET_BUTTON__",
+            "" if read_only_ui else '<button type="button" id="configResetBtn" data-i18n="common.cancel">Cancel</button>',
+        )
         .replace(
             "__METRICS_BUTTON__",
             '<button type="button" class="qr-mini header-stat" id="telemtStatsBtn" data-i18n="button.globalStatsShort" data-i18n-title="button.globalStats" title="Общая статистика TeleMT">stat</button>'
@@ -2259,7 +2290,7 @@ PAGE = r"""
           <label for="secret" data-i18n="form.secret">Secret</label>
           <div class="secret-row">
             <input id="secret" name="secret" autocomplete="off" pattern="[0-9a-fA-F]{32}">
-            <button type="button" id="genSecret" data-i18n="form.generate">Сгенерировать</button>
+            __USER_GEN_SECRET_BUTTON__
           </div>
         </div>
         <div class="field">
@@ -2269,9 +2300,9 @@ PAGE = r"""
         <label class="checkline"><input id="blocked" name="blocked" type="checkbox"> <span data-i18n="form.blocked">Заблокирован</span></label>
       </div>
       <div class="modal-foot">
-        <button type="button" class="danger" id="deleteBtn" hidden data-i18n="common.delete">Удалить</button>
+        __USER_DELETE_BUTTON__
         <button type="button" id="editCloseBtn" data-close="editDialog" data-i18n="common.cancel">Отмена</button>
-        <button type="submit" class="primary" id="saveBtn" data-i18n="common.save">Сохранить</button>
+        __USER_SAVE_BUTTON__
       </div>
     </form>
   </dialog>
@@ -2289,6 +2320,9 @@ PAGE = r"""
           <button type="button" id="copyBtn" data-i18n="common.copy">Скопировать</button>
         </div>
       </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" data-close="linkDialog" data-i18n="common.close">Close</button>
     </div>
   </dialog>
 
@@ -2378,7 +2412,7 @@ PAGE = r"""
       <div class="settings-savebar">
         <div class="settings-warnings" id="configWarnings"></div>
         <div class="settings-save-actions">
-          <button type="button" id="configResetBtn" data-i18n="common.cancel">Cancel</button>
+          __CONFIG_RESET_BUTTON__
           <button type="button" class="primary" id="configSaveBtn" data-i18n="common.save">Save</button>
         </div>
       </div>
@@ -2743,7 +2777,7 @@ PAGE = r"""
           <td class="stat-td"></td>
           <td><div class="date-cell"></div></td>
           <td><span class="pill"></span></td>
-          <td><div class="status-cell"><button class="mini" title="${u.blocked ? t("status.enable") : t("status.disable")}" data-act="toggle">${u.blocked ? "▶" : "II"}</button><span class="pill ${u.blocked ? "off" : "ok"}">${u.blocked ? t("status.blocked") : t("status.active")}</span></div></td>`;
+          <td><div class="status-cell">__USER_TOGGLE_BUTTON__<span class="pill ${u.blocked ? "off" : "ok"}">${u.blocked ? t("status.blocked") : t("status.active")}</span></div></td>`;
         tr.querySelector(".name").textContent = u.name;
         const editBtn = tr.querySelector('[data-act="edit"]');
         editBtn.textContent = state.configWritable ? t("button.editShort") : t("button.viewShort");
@@ -2758,11 +2792,7 @@ PAGE = r"""
         tr.querySelector('[data-act="link"]').onclick = () => showLink(u);
         if (state.metrics.enabled && state.metrics.available) statsEl.onclick = () => showStats(u);
         editBtn.onclick = () => editUser(u);
-        const toggleBtn = tr.querySelector('[data-act="toggle"]');
-        toggleBtn.hidden = !state.configWritable;
-        toggleBtn.style.display = state.configWritable ? "" : "none";
-        toggleBtn.disabled = !state.configWritable;
-        if (state.configWritable) toggleBtn.onclick = () => toggleUser(u, toggleBtn);
+        __USER_TOGGLE_BINDING__
         rows.appendChild(tr);
       }
     }
@@ -2778,7 +2808,7 @@ PAGE = r"""
       if (!state.configWritable) return;
       state.editing = null;
       $("editTitle").textContent = t("modal.addUser");
-      $("deleteBtn").hidden = true;
+      if ($("deleteBtn")) $("deleteBtn").hidden = true;
       $("name").value = "";
       $("limit").value = "0";
       $("secret").value = randomSecret();
@@ -2793,15 +2823,21 @@ PAGE = r"""
         $(id).readOnly = readonly;
       });
       $("blocked").disabled = readonly;
-      $("genSecret").hidden = readonly;
-      $("genSecret").style.display = readonly ? "none" : "";
-      $("genSecret").disabled = readonly;
-      $("deleteBtn").hidden = readonly || !state.editing;
-      $("deleteBtn").style.display = readonly || !state.editing ? "none" : "";
-      $("deleteBtn").disabled = readonly;
-      $("saveBtn").hidden = readonly;
-      $("saveBtn").style.display = readonly ? "none" : "";
-      $("saveBtn").disabled = readonly;
+      if ($("genSecret")) {
+        $("genSecret").hidden = readonly;
+        $("genSecret").style.display = readonly ? "none" : "";
+        $("genSecret").disabled = readonly;
+      }
+      if ($("deleteBtn")) {
+        $("deleteBtn").hidden = readonly || !state.editing;
+        $("deleteBtn").style.display = readonly || !state.editing ? "none" : "";
+        $("deleteBtn").disabled = readonly;
+      }
+      if ($("saveBtn")) {
+        $("saveBtn").hidden = readonly;
+        $("saveBtn").style.display = readonly ? "none" : "";
+        $("saveBtn").disabled = readonly;
+      }
       $("editCloseBtn").dataset.i18n = readonly ? "common.close" : "common.cancel";
       $("editCloseBtn").textContent = readonly ? t("common.close") : t("common.cancel");
     }
@@ -3531,11 +3567,11 @@ PAGE = r"""
       });
     });
     $("editForm").addEventListener("submit", saveUser);
-    $("genSecret").onclick = () => {
+    if ($("genSecret")) $("genSecret").onclick = () => {
       if (!state.configWritable || $("genSecret").disabled) return;
       $("secret").value = randomSecret();
     };
-    $("deleteBtn").onclick = () => state.editing && deleteUser({ name: state.editing });
+    if ($("deleteBtn")) $("deleteBtn").onclick = () => state.editing && deleteUser({ name: state.editing });
     $("copyBtn").onclick = async () => {
       await navigator.clipboard.writeText($("linkText").value);
       toast(t("common.copied"));
