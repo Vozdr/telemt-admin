@@ -1,220 +1,31 @@
 from __future__ import annotations
 
-import base64
 import errno
 import html
-import io
 import json
 import os
 import re
 import secrets
 import shutil
+import sys
 import tomllib
 import urllib.request
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
-import qrcode
-import qrcode.image.svg
-from fastapi import Cookie, Form, Request
-from fastapi import Depends, HTTPException
+from fastapi import HTTPException
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from pydantic import BaseModel, Field
 
-
-CONFIG_PATH = Path(os.getenv("TELEMT_CONFIG", "/data/telemt/config/config.toml"))
-BACKUP_DIR = Path(os.getenv("TELEMT_BACKUP_DIR", "/data/backups"))
-MAX_BACKUPS = int(os.getenv("TELEMT_MAX_BACKUPS", "20"))
-APP_VERSION = os.getenv("TELEMT_ADMIN_VERSION", "dev")
-DEV_VERSION = os.getenv("TELEMT_ADMIN_DEV_VERSION", "1.2.0")
-DISPLAY_VERSION = f"{DEV_VERSION} dev" if APP_VERSION == "dev" else APP_VERSION
-LOG_LEVEL = os.getenv("LOG_LEVEL", "ERROR")
-GITHUB_URL = "https://github.com/Vozdr/telemt-admin/"
-READ_ONLY = os.getenv("READ_ONLY", "no").lower() in {"1", "true", "yes", "on"}
-ENABLE_METRICS = os.getenv("ENABLE_METRICS", "yes").lower() not in {"0", "false", "no", "off"}
-TELEMT_METRICS_LISTEN = os.getenv("TELEMT_METRICS_LISTEN", "0.0.0.0:9090")
-AUTO_FIX_METRICS_LISTEN = os.getenv("AUTO_FIX_METRICS_LISTEN", "yes").lower() not in {"0", "false", "no", "off"}
-METRICS_URL = os.getenv("TELEMT_METRICS_URL", "http://telemt:9090/metrics")
-ENABLE_BASIC_AUTH = os.getenv("ENABLE_BASIC_AUTH", "no").lower() in {"1", "true", "yes", "on"}
-ENABLE_WEB_AUTH = os.getenv("ENABLE_WEB_AUTH", "yes").lower() not in {"0", "false", "no", "off"}
-BASIC_ADMIN_USER = os.getenv("BASIC_ADMIN_USER") or os.getenv("ADMIN_USER") or os.getenv("XUI_ADMIN_USER") or "admin"
-BASIC_ADMIN_PASS = os.getenv("BASIC_ADMIN_PASS") or os.getenv("ADMIN_PASS") or os.getenv("XUI_ADMIN_PASS") or "admin"
-WEB_ADMIN_USER = os.getenv("WEB_ADMIN_USER") or os.getenv("ADMIN_USER") or os.getenv("XUI_ADMIN_USER") or "admin"
-WEB_ADMIN_PASS = os.getenv("WEB_ADMIN_PASS") or os.getenv("ADMIN_PASS") or os.getenv("XUI_ADMIN_PASS") or "admin"
-SESSION_SECRET = os.getenv("SESSION_SECRET") or WEB_ADMIN_PASS or BASIC_ADMIN_PASS or secrets.token_hex(16)
-DEFAULT_LANG = os.getenv("DEFAULT_LANG", "en")
-DEFAULT_THEME = os.getenv("DEFAULT_THEME", "dark").lower()
-if DEFAULT_THEME not in {"light", "dark"}:
-    DEFAULT_THEME = "dark"
-LOCALES_DIR = Path(os.getenv("LOCALES_DIR", "/app/locales"))
-DOCS_CACHE_DIR = Path(os.getenv("TELEMT_DOCS_CACHE_DIR", "/tmp/telemt-admin-docs"))
-ENABLE_DOCS_FETCH = os.getenv("ENABLE_DOCS_FETCH", "yes").lower() not in {"0", "false", "no", "off"}
-DOCS_FETCH_TIMEOUT = int(os.getenv("TELEMT_DOCS_FETCH_TIMEOUT", "8"))
-DOCS_URLS = {
-    "en": os.getenv(
-        "TELEMT_CONFIG_PARAMS_EN_URL",
-        "https://raw.githubusercontent.com/telemt/telemt/main/docs/Config_params/CONFIG_PARAMS.en.md",
-    ),
-    "ru": os.getenv(
-        "TELEMT_CONFIG_PARAMS_RU_URL",
-        "https://raw.githubusercontent.com/telemt/telemt/main/docs/Config_params/CONFIG_PARAMS.ru.md",
-    ),
-}
-DOCS_PUBLIC_URLS = {
-    "en": os.getenv(
-        "TELEMT_CONFIG_PARAMS_EN_PUBLIC_URL",
-        "https://github.com/telemt/telemt/blob/main/docs/Config_params/CONFIG_PARAMS.en.md",
-    ),
-    "ru": os.getenv(
-        "TELEMT_CONFIG_PARAMS_RU_PUBLIC_URL",
-        "https://github.com/telemt/telemt/blob/main/docs/Config_params/CONFIG_PARAMS.ru.md",
-    ),
-}
-SECRET_RE = re.compile(r"^[0-9a-fA-F]{32}$")
-NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-SECTION_RE = re.compile(r"^\s*\[([^\]]+)\]\s*(?:#.*)?$")
-META_RE = re.compile(
-    r"^\s*#\s*telemt-admin:\s+user=(?P<user>[A-Za-z0-9_-]+)"
-    r"(?:\s+added_at=(?P<added_at>\S+))?"
-    r"(?:\s+updated_at=(?P<updated_at>\S+))?"
-    r"(?:\s+blocked_at=(?P<blocked_at>\S+))?\s*$"
-)
-ASSIGN_RE = re.compile(
-    r"^(?P<prefix>\s*)(?P<comment>#\s*)?(?P<key>[A-Za-z0-9_-]+)\s*=\s*"
-    r"(?P<value>\"(?:[^\"\\]|\\.)*\"|[0-9]+)\s*(?P<trail>#.*)?$"
-)
-ASSIGN_ANY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+)\s*=\s*(?P<value>.+?)\s*(?:#.*)?$")
-DOC_META: dict[str, dict[str, dict[str, Any]]] = {"en": {}, "ru": {}}
+from api import create_api_router
+from auth import *
+from links import *
+from metrics import *
+from models import *
+from pages import create_pages_router
+from settings import *
 
 
 app = FastAPI(title="TeleMT Admin")
-security = HTTPBasic(auto_error=False)
-
-
-def make_session_token(username: str) -> str:
-    import hashlib
-    import hmac
-    import time
-
-    issued = str(int(time.time()))
-    payload = f"{username}:{issued}"
-    signature = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    return base64.urlsafe_b64encode(f"{payload}:{signature}".encode()).decode()
-
-
-def valid_session_token(token: str | None) -> bool:
-    import hashlib
-    import hmac
-    import time
-
-    if not token:
-        return False
-    try:
-        raw = base64.urlsafe_b64decode(token.encode()).decode()
-        username, issued, signature = raw.rsplit(":", 2)
-    except Exception:
-        return False
-    payload = f"{username}:{issued}"
-    expected = hmac.new(SESSION_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected):
-        return False
-    if username != WEB_ADMIN_USER:
-        return False
-    return int(time.time()) - int(issued) < 60 * 60 * 24 * 30
-
-
-def valid_basic(credentials: HTTPBasicCredentials | None) -> bool:
-    if not credentials:
-        return False
-    user_ok = secrets.compare_digest(credentials.username, BASIC_ADMIN_USER)
-    pass_ok = secrets.compare_digest(credentials.password, BASIC_ADMIN_PASS)
-    return user_ok and pass_ok
-
-
-def require_auth(
-    credentials: HTTPBasicCredentials | None = Depends(security),
-    telemt_admin_session: str | None = Cookie(default=None),
-) -> None:
-    if not ENABLE_BASIC_AUTH and not ENABLE_WEB_AUTH:
-        return
-    if ENABLE_BASIC_AUTH and not valid_basic(credentials):
-        raise HTTPException(
-            status_code=401,
-            detail="Basic authentication required",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    if ENABLE_WEB_AUTH and not valid_session_token(telemt_admin_session):
-        raise HTTPException(status_code=401, detail="Web authentication required")
-
-
-class UserInput(BaseModel):
-    name: str = Field(min_length=1, max_length=64)
-    secret: str | None = None
-    limit: int = Field(default=0, ge=0, le=100000)
-    comment: str = Field(default="", max_length=200)
-    blocked: bool = False
-
-
-class RenameInput(UserInput):
-    old_name: str = Field(min_length=1, max_length=64)
-
-
-class ToggleInput(BaseModel):
-    blocked: bool
-
-
-class SecretInput(BaseModel):
-    secret: str | None = None
-
-
-class ConfigSettingChange(BaseModel):
-    section: str = Field(default="")
-    key: str = Field(min_length=1, max_length=128)
-    type: str = Field(default="unknown", max_length=128)
-    action: str = Field(default="set", max_length=16)
-    value: Any = None
-
-
-class ConfigSettingsInput(BaseModel):
-    changes: list[ConfigSettingChange] = Field(default_factory=list)
-
-
-@dataclass
-class UserRecord:
-    name: str
-    secret: str
-    limit: int
-    comment: str
-    blocked: bool
-    added_at: str
-    updated_at: str
-    blocked_at: str
-    stats: dict[str, Any]
-    link: str
-    qr: str
-
-
-@dataclass(frozen=True)
-class ConfigSpec:
-    section: str
-    key: str
-    kind: str
-    default: Any = ""
-    hot_reload: bool = False
-    editable: bool = False
-    choices: tuple[str, ...] = ()
-
-    @property
-    def id(self) -> str:
-        return f"{self.section}.{self.key}" if self.section else self.key
-
-
-def spec(section: str, key: str, kind: str, default: Any = "", hot_reload: bool = False, choices: tuple[str, ...] = ()) -> ConfigSpec:
-    return ConfigSpec(section, key, kind, default, hot_reload, False, choices)
 
 
 CONFIG_SPECS: tuple[ConfigSpec, ...] = (
@@ -1298,112 +1109,6 @@ def generated_secret() -> str:
     return secrets.token_hex(16)
 
 
-def domain_hex(domain: str) -> str:
-    return domain.encode("utf-8").hex()
-
-
-def make_link(secret: str, host: str, port: int, tls_domain: str) -> str:
-    sni_domain = tls_domain or host
-    return f"tg://proxy?server={host}&port={port}&secret=ee{secret}{domain_hex(sni_domain)}"
-
-
-def make_qr_data_uri(link: str) -> str:
-    img = qrcode.make(link, image_factory=qrcode.image.svg.SvgPathImage)
-    buf = io.BytesIO()
-    img.save(buf)
-    return "data:image/svg+xml;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-
-
-def parse_labels(raw: str) -> dict[str, str]:
-    labels: dict[str, str] = {}
-    for part in re.findall(r'(\w+)="((?:[^"\\]|\\.)*)"', raw):
-        labels[part[0]] = bytes(part[1], "utf-8").decode("unicode_escape")
-    return labels
-
-
-def read_metrics() -> tuple[dict[str, dict[str, float]], list[dict[str, Any]], list[dict[str, Any]], bool]:
-    if not ENABLE_METRICS:
-        return {}, [], [], False
-    try:
-        with urllib.request.urlopen(METRICS_URL, timeout=3) as response:
-            text = response.read().decode("utf-8", "replace")
-    except Exception:
-        return {}, [], [], False
-
-    per_user: dict[str, dict[str, float]] = {}
-    raw_user: list[dict[str, Any]] = []
-    raw_global: list[dict[str, Any]] = []
-    metric_re = re.compile(r"^(?P<name>[a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(?P<labels>[^}]*)\})?\s+(?P<value>[-+0-9.eE]+)$")
-    for line in text.splitlines():
-        if not line or line.startswith("#"):
-            continue
-        m = metric_re.match(line)
-        if not m:
-            continue
-        labels = parse_labels(m.group("labels") or "")
-        try:
-            value = float(m.group("value"))
-        except ValueError:
-            continue
-        name = m.group("name")
-        user = labels.get("user")
-        item = {"name": name, "labels": labels, "value": value}
-        if user:
-            per_user.setdefault(user, {})[name] = value
-            raw_user.append(item)
-        else:
-            raw_global.append(item)
-    return per_user, raw_user, raw_global, bool(raw_user or raw_global)
-
-
-def user_stats(metrics: dict[str, float]) -> dict[str, Any]:
-    rx = int(metrics.get("telemt_user_octets_from_client", 0))
-    tx = int(metrics.get("telemt_user_octets_to_client", 0))
-    return {
-        "connections_total": int(metrics.get("telemt_user_connections_total", 0)),
-        "connections_current": int(metrics.get("telemt_user_connections_current", 0)),
-        "bytes_from_client": rx,
-        "bytes_to_client": tx,
-        "bytes_total": rx + tx,
-        "msgs_from_client": int(metrics.get("telemt_user_msgs_from_client", 0)),
-        "msgs_to_client": int(metrics.get("telemt_user_msgs_to_client", 0)),
-        "unique_ips_current": int(metrics.get("telemt_user_unique_ips_current", 0)),
-        "unique_ips_recent_window": int(metrics.get("telemt_user_unique_ips_recent_window", 0)),
-        "unique_ips_limit": int(metrics.get("telemt_user_unique_ips_limit", 0)),
-        "unique_ips_utilization": float(metrics.get("telemt_user_unique_ips_utilization", 0)),
-        "available": bool(metrics),
-    }
-
-
-def latest_metric(metrics: list[dict[str, Any]], name: str, labels: dict[str, str] | None = None) -> float:
-    labels = labels or {}
-    value = 0.0
-    for item in metrics:
-        if item["name"] != name:
-            continue
-        if all(item["labels"].get(k) == v for k, v in labels.items()):
-            value = float(item["value"])
-    return value
-
-
-def global_stats(metrics: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "uptime_seconds": latest_metric(metrics, "telemt_uptime_seconds"),
-        "connections_total": latest_metric(metrics, "telemt_connections_total"),
-        "connections_bad_total": latest_metric(metrics, "telemt_connections_bad_total"),
-        "handshake_timeouts_total": latest_metric(metrics, "telemt_handshake_timeouts_total"),
-        "user_entries": latest_metric(metrics, "telemt_stats_user_entries"),
-        "user_telemetry_enabled": latest_metric(metrics, "telemt_telemetry_user_enabled"),
-        "buffer_in_use": latest_metric(metrics, "telemt_buffer_pool_buffers_total", {"kind": "in_use"}),
-        "buffer_allocated": latest_metric(metrics, "telemt_buffer_pool_buffers_total", {"kind": "allocated"}),
-        "upstream_connect_attempts": latest_metric(metrics, "telemt_upstream_connect_attempt_total"),
-        "upstream_connect_success": latest_metric(metrics, "telemt_upstream_connect_success_total"),
-        "upstream_connect_fail": latest_metric(metrics, "telemt_upstream_connect_fail_total"),
-        "enabled": ENABLE_METRICS,
-        "available": bool(metrics),
-    }
-
-
 def line_for_user(name: str, secret: str, comment: str, blocked: bool) -> str:
     prefix = "# " if blocked else ""
     return f'{prefix}{name} = "{secret}"{quote_comment(comment)}'
@@ -1507,7 +1212,7 @@ def upsert_user(data: UserInput, old_name: str | None = None) -> None:
     write_config("\n".join(lines).rstrip() + "\n")
 
 
-def list_users() -> list[UserRecord]:
+def list_users(include_stats: bool = True, include_link: bool = False, metrics_snapshot: tuple[dict[str, dict[str, float]], dict[str, float], list[dict[str, Any]], bool] | None = None) -> list[UserRecord]:
     text = read_config()
     host = telemt_public_host(text)
     port = telemt_public_port(text)
@@ -1515,7 +1220,10 @@ def list_users() -> list[UserRecord]:
     lines = text.splitlines()
     users = parse_assignments(lines, "access.users")
     limits = parse_assignments(lines, "access.user_max_unique_ips")
-    metrics, _, _, metrics_available = read_metrics()
+    metrics: dict[str, dict[str, float]] = {}
+    metrics_available = False
+    if include_stats:
+        metrics, _, _, metrics_available = metrics_snapshot if metrics_snapshot is not None else read_metrics()
     result: list[UserRecord] = []
     for name in sorted(users):
         u = users[name]
@@ -1524,10 +1232,45 @@ def list_users() -> list[UserRecord]:
         limit = int(limit_item["value"]) if limit_item and str(limit_item["value"]).isdigit() else 0
         comment = u["comment"]
         secret = validate_secret(str(u["value"]))
-        link = make_link(secret, host, port, tls_domain) if host else ""
-        stats = user_stats(metrics.get(name, {})) if metrics_available else user_stats({})
-        result.append(UserRecord(name, secret, limit, comment, blocked, u["added_at"], u["updated_at"], u["blocked_at"], stats, link, make_qr_data_uri(link)))
+        link = make_link(secret, host, port, tls_domain) if include_link and host else ""
+        stats = user_table_stats(metrics.get(name, {})) if metrics_available else user_table_stats({})
+        qr = make_qr_data_uri(link) if include_link and link else ""
+        result.append(UserRecord(name, secret, limit, comment, blocked, u["added_at"], u["updated_at"], u["blocked_at"], stats, link, qr))
     return result
+
+
+def user_table_payload(user: UserRecord) -> dict[str, Any]:
+    return {
+        "name": user.name,
+        "limit": user.limit,
+        "comment": user.comment,
+        "blocked": user.blocked,
+        "added_at": user.added_at,
+        "updated_at": user.updated_at,
+        "blocked_at": user.blocked_at,
+        "stats": user.stats,
+    }
+
+
+def user_detail_payload(user: UserRecord) -> dict[str, Any]:
+    return {
+        "name": user.name,
+        "secret": user.secret,
+        "limit": user.limit,
+        "comment": user.comment,
+        "blocked": user.blocked,
+        "added_at": user.added_at,
+        "updated_at": user.updated_at,
+        "blocked_at": user.blocked_at,
+    }
+
+
+def user_link_payload(user: UserRecord) -> dict[str, Any]:
+    return {
+        "name": user.name,
+        "link": user.link,
+        "qr": user.qr,
+    }
 
 
 def empty_users_payload(config_read_error: str) -> dict[str, Any]:
@@ -1547,21 +1290,12 @@ def empty_users_payload(config_read_error: str) -> dict[str, Any]:
     }
 
 
-def find_user(name: str) -> UserRecord:
+def find_user(name: str, include_stats: bool = True, include_link: bool = False) -> UserRecord:
     validate_name(name)
-    for user in list_users():
+    for user in list_users(include_stats=include_stats, include_link=include_link):
         if user.name == name:
             return user
     raise HTTPException(404, "Пользователь не найден.")
-
-
-@app.get("/healthz")
-def healthz() -> dict[str, str]:
-    read_ok, read_detail = probe_config_read()
-    if not read_ok:
-        raise HTTPException(503, f"TeleMT config read failed: {read_detail}")
-    write_ok, _ = probe_config_write()
-    return {"status": "ok", "config": "rw" if write_ok else "ro"}
 
 
 def available_locales() -> list[dict[str, str]]:
@@ -1585,22 +1319,6 @@ def available_locales() -> list[dict[str, str]]:
     if not result:
         result.append({"code": "en", "name": "English", "native_name": "English"})
     return result
-
-
-@app.get("/api/i18n")
-def api_i18n_list() -> dict[str, Any]:
-    return {"default": DEFAULT_LANG, "locales": available_locales()}
-
-
-@app.get("/api/i18n/{lang}")
-def api_i18n(lang: str) -> dict[str, Any]:
-    lang = re.sub(r"[^a-zA-Z0-9_-]", "", lang) or DEFAULT_LANG
-    path = LOCALES_DIR / f"{lang}.json"
-    if not path.exists():
-        path = LOCALES_DIR / f"{DEFAULT_LANG}.json"
-    if not path.exists():
-        path = LOCALES_DIR / "en.json"
-    return json.loads(path.read_text(encoding="utf-8"))
 
 
 LOGIN_PAGE = """
@@ -1733,47 +1451,6 @@ def render_login_page(error: bool = False) -> str:
     )
 
 
-@app.get("/login", response_class=HTMLResponse)
-def login_page(credentials: HTTPBasicCredentials | None = Depends(security)):
-    if ENABLE_BASIC_AUTH and not valid_basic(credentials):
-        raise HTTPException(
-            status_code=401,
-            detail="Basic authentication required",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    if not ENABLE_WEB_AUTH:
-        return RedirectResponse("./")
-    return render_login_page()
-
-
-@app.post("/login")
-def login_submit(
-    username: str = Form(...),
-    password: str = Form(...),
-    credentials: HTTPBasicCredentials | None = Depends(security),
-):
-    if ENABLE_BASIC_AUTH and not valid_basic(credentials):
-        raise HTTPException(
-            status_code=401,
-            detail="Basic authentication required",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    if not ENABLE_WEB_AUTH:
-        return RedirectResponse("./", status_code=303)
-    if secrets.compare_digest(username, WEB_ADMIN_USER) and secrets.compare_digest(password, WEB_ADMIN_PASS):
-        response = RedirectResponse("./", status_code=303)
-        response.set_cookie("telemt_admin_session", make_session_token(username), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
-        return response
-    return HTMLResponse(render_login_page(error=True), status_code=401)
-
-
-@app.get("/logout")
-def logout():
-    response = RedirectResponse("login", status_code=303)
-    response.delete_cookie("telemt_admin_session")
-    return response
-
-
 def render_index_page() -> str:
     page = PAGE
     metrics_ui_enabled = False
@@ -1835,135 +1512,8 @@ def render_index_page() -> str:
     )
 
 
-@app.get("/api/users")
-def api_users(_: None = Depends(require_auth)) -> dict[str, Any]:
-    try:
-        text = read_config()
-    except HTTPException as exc:
-        return empty_users_payload(str(exc.detail))
-    users = list_users()
-    _, _, _, metrics_available = read_metrics()
-    config = telemt_config_info(text)
-    config_writable, _ = probe_config_write()
-    return {
-        "users": [u.__dict__ for u in users],
-        "domain": config["endpoint"],
-        "public_host": config["public_host"],
-        "public_port": config["public_port"],
-        "config": config,
-        "config_writable": config_writable,
-        "metrics": {"enabled": ENABLE_METRICS, "url": METRICS_URL, "available": metrics_available},
-        "default_lang": DEFAULT_LANG,
-        "default_theme": DEFAULT_THEME,
-        "updated_at": now_local().isoformat(timespec="seconds"),
-    }
-
-
-@app.get("/api/telemt/config")
-def api_telemt_config(_: None = Depends(require_auth)) -> dict[str, Any]:
-    config_writable, _ = probe_config_write()
-    try:
-        result = telemt_config_info(read_config())
-        result["config_writable"] = config_writable
-        return result
-    except HTTPException as exc:
-        return {"error": str(exc.detail), "endpoint": "", "public_host": "", "public_port": 443, "config_writable": config_writable}
-
-
-@app.post("/api/telemt/config/settings")
-def api_update_telemt_config(data: ConfigSettingsInput, _: None = Depends(require_auth)) -> dict[str, Any]:
-    ensure_config_writable()
-    return {"ok": True, "config": update_config_settings(data.changes)}
-
-
-@app.get("/api/users/{name}/stats")
-def api_user_stats(name: str, _: None = Depends(require_auth)) -> dict[str, Any]:
-    user = find_user(name)
-    if not ENABLE_METRICS:
-        return {"user": user.name, "summary": user_stats({}), "metrics": []}
-    metrics, raw, _, available = read_metrics()
-    if not available:
-        return {"user": user.name, "summary": user_stats({}), "metrics": []}
-    rows = [item for item in raw if item["labels"].get("user") == name]
-    return {"user": user.name, "summary": user_stats(metrics.get(name, {})), "metrics": rows}
-
-
-@app.get("/api/telemt/stats")
-def api_telemt_stats(_: None = Depends(require_auth)) -> dict[str, Any]:
-    if not ENABLE_METRICS:
-        return {"summary": global_stats([]), "metrics": []}
-    _, _, raw, available = read_metrics()
-    if not available:
-        return {"summary": global_stats([]), "metrics": []}
-    return {"summary": global_stats(raw), "metrics": raw}
-
-
-@app.post("/api/users")
-def api_create_user(data: UserInput, _: None = Depends(require_auth)) -> dict[str, Any]:
-    ensure_config_writable()
-    if not data.secret:
-        data.secret = generated_secret()
-    upsert_user(data)
-    return {"ok": True, "user": find_user(data.name).__dict__}
-
-
-@app.put("/api/users/{name}")
-def api_update_user(name: str, data: UserInput, _: None = Depends(require_auth)) -> dict[str, Any]:
-    ensure_config_writable()
-    upsert_user(data, old_name=name)
-    return {"ok": True, "user": find_user(data.name).__dict__}
-
-
-@app.post("/api/users/{name}/secret")
-def api_rotate_secret(name: str, data: SecretInput, _: None = Depends(require_auth)) -> dict[str, Any]:
-    ensure_config_writable()
-    user = find_user(name)
-    new_secret = validate_secret(data.secret or generated_secret())
-    upsert_user(UserInput(name=user.name, secret=new_secret, limit=user.limit, comment=user.comment, blocked=user.blocked), old_name=name)
-    return {"ok": True, "user": find_user(name).__dict__}
-
-
-@app.post("/api/users/{name}/blocked")
-def api_toggle_user(name: str, data: ToggleInput, _: None = Depends(require_auth)) -> dict[str, Any]:
-    ensure_config_writable()
-    user = find_user(name)
-    upsert_user(UserInput(name=user.name, secret=user.secret, limit=user.limit, comment=user.comment, blocked=data.blocked), old_name=name)
-    return {"ok": True, "user": find_user(name).__dict__}
-
-
-@app.delete("/api/users/{name}")
-def api_delete_user(name: str, _: None = Depends(require_auth)) -> dict[str, bool]:
-    ensure_config_writable()
-    validate_name(name)
-    text = read_config()
-    lines = text.splitlines()
-    if name not in parse_assignments(lines, "access.users"):
-        raise HTTPException(404, "Пользователь не найден.")
-    remove_key(lines, "access.user_max_unique_ips", name)
-    remove_user_with_meta(lines, name)
-    write_config("\n".join(lines).rstrip() + "\n")
-    return {"ok": True}
-
-
-@app.get("/", response_class=HTMLResponse)
-def index(
-    request: Request,
-    credentials: HTTPBasicCredentials | None = Depends(security),
-    telemt_admin_session: str | None = Cookie(default=None),
-):
-    if not ENABLE_BASIC_AUTH and not ENABLE_WEB_AUTH:
-        return render_index_page()
-    if ENABLE_BASIC_AUTH and not valid_basic(credentials):
-        raise HTTPException(
-            status_code=401,
-            detail="Basic authentication required",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    if ENABLE_WEB_AUTH and valid_session_token(telemt_admin_session):
-        return render_index_page()
-    if ENABLE_WEB_AUTH:
-        return RedirectResponse("login", status_code=303)
-    return render_index_page()
+app.include_router(create_pages_router(sys.modules[__name__]))
+app.include_router(create_api_router(sys.modules[__name__]))
 
 
 PAGE = r"""
@@ -2036,7 +1586,7 @@ PAGE = r"""
     .toolbar-side { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .toolbar-stack { display: grid; gap: 6px; justify-items: end; }
     .toolbar-updated { color: var(--muted); font-size: 12px; min-height: 16px; }
-    .app-footer { margin-top: 18px; text-align: right; color: var(--muted); font-size: 12px; }
+    .app-footer { margin-top: 18px; text-align: center; color: var(--muted); font-size: 12px; }
     .app-footer a { color: var(--muted); text-decoration: none; }
     .app-footer a:hover { color: var(--accent-dark); text-decoration: underline; }
     button, a.button-link { height: 38px; border: 1px solid var(--line); border-radius: 7px; background: var(--control); color: var(--ink); padding: 0 12px; font: inherit; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
@@ -2150,8 +1700,9 @@ PAGE = r"""
     .settings-title { grid-column: 1 / -1; padding: 9px 10px; background: var(--soft); color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
     .settings-row:last-child { border-bottom: 0; }
     .settings-row code { overflow-wrap: anywhere; color: var(--ink); }
-    .settings-row .muted, .settings-value, .settings-default { color: var(--muted); overflow-wrap: anywhere; }
-    .settings-value.same-default, .settings-default.defined { color: var(--ok); }
+    .settings-row .muted, .settings-value { color: var(--muted); overflow-wrap: anywhere; }
+    .settings-default { color: var(--ok); overflow-wrap: anywhere; }
+    .settings-value.same-default { color: var(--ok); }
     .settings-value.diff-default { color: #9d4edd; }
     .settings-row.changed { background: var(--accent-soft); }
     .settings-row.delete-pending { background: color-mix(in srgb, var(--danger) 9%, transparent); }
@@ -2274,7 +1825,7 @@ PAGE = r"""
         <div class="toolbar-updated" id="updatedAt"></div>
       </div>
     </div>
-    <div class="app-footer"><a href="https://github.com/Vozdr/telemt-admin/" target="_blank" rel="noopener noreferrer">TeleMT Admin __APP_VERSION__</a></div>
+    <div class="app-footer">Powered by: <a href="https://github.com/Vozdr/telemt-admin/" target="_blank" rel="noopener noreferrer">TeleMT Admin __APP_VERSION__</a></div>
   </div>
 
   <dialog id="editDialog">
@@ -2808,6 +2359,46 @@ PAGE = r"""
       return `${m} мин`;
     }
 
+    function latestMetric(metrics, name, labels = {}) {
+      let value = 0;
+      for (const item of metrics || []) {
+        if (item.name !== name) continue;
+        const itemLabels = item.labels || {};
+        const matched = Object.entries(labels).every(([key, expected]) => itemLabels[key] === expected);
+        if (matched) value = Number(item.value || 0);
+      }
+      return value;
+    }
+
+    function userStatsFromMetrics(metrics) {
+      const rx = latestMetric(metrics, "telemt_user_octets_from_client");
+      const tx = latestMetric(metrics, "telemt_user_octets_to_client");
+      return {
+        connections_total: latestMetric(metrics, "telemt_user_connections_total"),
+        connections_current: latestMetric(metrics, "telemt_user_connections_current"),
+        bytes_from_client: rx,
+        bytes_to_client: tx,
+        unique_ips_current: latestMetric(metrics, "telemt_user_unique_ips_current"),
+        unique_ips_recent_window: latestMetric(metrics, "telemt_user_unique_ips_recent_window"),
+        unique_ips_limit: latestMetric(metrics, "telemt_user_unique_ips_limit")
+      };
+    }
+
+    function telemtStatsFromMetrics(metrics) {
+      return {
+        uptime_seconds: latestMetric(metrics, "telemt_uptime_seconds"),
+        connections_total: latestMetric(metrics, "telemt_connections_total"),
+        connections_bad_total: latestMetric(metrics, "telemt_connections_bad_total"),
+        handshake_timeouts_total: latestMetric(metrics, "telemt_handshake_timeouts_total"),
+        user_entries: latestMetric(metrics, "telemt_stats_user_entries"),
+        user_telemetry_enabled: latestMetric(metrics, "telemt_telemetry_user_enabled"),
+        buffer_in_use: latestMetric(metrics, "telemt_buffer_pool_buffers_total", { kind: "in_use" }),
+        buffer_allocated: latestMetric(metrics, "telemt_buffer_pool_buffers_total", { kind: "allocated" }),
+        upstream_connect_success: latestMetric(metrics, "telemt_upstream_connect_success_total"),
+        upstream_connect_fail: latestMetric(metrics, "telemt_upstream_connect_fail_total")
+      };
+    }
+
     function statLine(stats) {
       if (!state.metrics.enabled || !state.metrics.available) return "—";
       if (!stats || !stats.available) return "N/A";
@@ -2886,9 +2477,10 @@ PAGE = r"""
         if (u.blocked && u.blocked_at) {
           tr.querySelector(".status-cell .pill").innerHTML = `${esc(t("status.blocked"))}<small>${esc(formatDate(u.blocked_at))}</small>`;
         }
-        tr.querySelector('[data-act="link"]').onclick = () => showLink(u);
+        const linkBtn = tr.querySelector('[data-act="link"]');
+        linkBtn.onclick = () => showLink(u, linkBtn);
         if (state.metrics.enabled && state.metrics.available) statsEl.onclick = () => showStats(u);
-        editBtn.onclick = () => editUser(u);
+        editBtn.onclick = () => editUser(u, editBtn);
         __USER_TOGGLE_BINDING__
         rows.appendChild(tr);
       }
@@ -2939,16 +2531,25 @@ PAGE = r"""
       $("editCloseBtn").textContent = readonly ? t("common.close") : t("common.cancel");
     }
 
-    function editUser(u) {
-      state.editing = u.name;
-      $("editTitle").textContent = `${state.configWritable ? t("modal.editUser") : t("modal.viewUser")}: ${u.name}`;
-      $("name").value = u.name;
-      $("limit").value = u.limit;
-      $("secret").value = u.secret;
-      $("comment").value = u.comment || "";
-      $("blocked").checked = u.blocked;
-      setEditReadonly(!state.configWritable);
-      openDialog("editDialog");
+    async function editUser(u, button = null) {
+      setButtonBusy(button, true);
+      try {
+        const data = await request(`api/users/${encodeURIComponent(u.name)}`);
+        const user = data.user || {};
+        state.editing = user.name || u.name;
+        $("editTitle").textContent = `${state.configWritable ? t("modal.editUser") : t("modal.viewUser")}: ${state.editing}`;
+        $("name").value = user.name || u.name;
+        $("limit").value = user.limit ?? u.limit ?? 0;
+        $("secret").value = user.secret || "";
+        $("comment").value = user.comment || "";
+        $("blocked").checked = Boolean(user.blocked);
+        setEditReadonly(!state.configWritable);
+        openDialog("editDialog");
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        setButtonBusy(button, false);
+      }
     }
 
     function formPayload() {
@@ -2965,7 +2566,7 @@ PAGE = r"""
       ev.preventDefault();
       if (!state.configWritable) return;
       const payload = formPayload();
-      const url = state.editing ? `api/users/${encodeURIComponent(state.editing)}` : "api/users";
+      const url = state.editing ? `api/users/${encodeURIComponent(state.editing)}` : "api/users/add";
       const method = state.editing ? "PUT" : "POST";
       setEditPending(true, $("saveBtn"));
       try {
@@ -2980,11 +2581,21 @@ PAGE = r"""
       }
     }
 
-    function showLink(u) {
+    async function showLink(u, button = null) {
+      setButtonBusy(button, true);
       $("linkTitle").textContent = `${t("modal.link")}: ${u.name}`;
-      $("qr").src = u.qr;
-      $("linkText").value = u.link;
+      $("qr").removeAttribute("src");
+      $("linkText").value = "";
       openDialog("linkDialog");
+      try {
+        const data = await request(`api/users/${encodeURIComponent(u.name)}/link`);
+        $("qr").src = data.qr || "";
+        $("linkText").value = data.link || "";
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        setButtonBusy(button, false);
+      }
     }
 
     function stopStatsRefresh() {
@@ -3007,7 +2618,7 @@ PAGE = r"""
     async function refreshStatsModal(name) {
       const data = await request(`api/users/${encodeURIComponent(name)}/stats`);
       if (state.statsUser !== name || !$("statsDialog") || !$("statsDialog").open) return;
-      const s = data.summary || {};
+      const s = userStatsFromMetrics(data.metrics || []);
       $("statsUpdated").textContent = `${t("stats.updated")}: ${new Date().toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US")}`;
       const cards = [
         [formatNumber(s.connections_current), t("stats.activeConnections")],
@@ -3073,7 +2684,7 @@ PAGE = r"""
     async function refreshTelemtStatsModal() {
       const data = await request("api/telemt/stats");
       if (!$("telemtStatsDialog") || !$("telemtStatsDialog").open) return;
-      const s = data.summary || {};
+      const s = telemtStatsFromMetrics(data.metrics || []);
       $("telemtStatsUpdated").textContent = `${t("stats.updated")}: ${new Date().toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US")}`;
       const cards = [
         [formatDuration(s.uptime_seconds), t("stats.uptime")],
@@ -3230,8 +2841,7 @@ PAGE = r"""
 
     function settingValueClass(item) {
       if (configIsChanged(item)) return "settings-value diff-default";
-      if (!item.default_defined) return "settings-value muted";
-      return settingValueDisplay(item) === item.default ? "settings-value same-default" : "settings-value diff-default";
+      return settingValueDisplay(item) === settingDefaultDisplay(item) ? "settings-value same-default" : "settings-value diff-default";
     }
 
     function renderConfigValueCell(item) {
