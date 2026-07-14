@@ -253,6 +253,32 @@ def parse_value(raw: str) -> str:
     return raw
 
 
+def parse_bool_value(raw: str) -> bool | None:
+    raw = str(raw).strip().lower()
+    if raw in {"true", "1", "yes", "on"}:
+        return True
+    if raw in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
+def parse_int_value(raw: Any) -> int:
+    try:
+        return int(str(raw).strip())
+    except Exception:
+        return 0
+
+
+def parse_rate_limit_value(raw: str) -> tuple[int, int]:
+    try:
+        value = tomllib.loads(f"v = {raw}")["v"]
+    except Exception:
+        return 0, 0
+    if not isinstance(value, dict):
+        return 0, 0
+    return parse_int_value(value.get("up_bps", 0)), parse_int_value(value.get("down_bps", 0))
+
+
 def configured_timezone() -> timezone | None:
     raw = os.getenv("TZ", "").strip()
     if not raw:
@@ -811,6 +837,17 @@ def generated_secret() -> str:
     return secrets.token_hex(16)
 
 
+def validate_expiration(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(400, "Expiration должен быть в формате RFC3339/ISO-8601, например 2026-12-31T23:59:59Z.") from exc
+    return value
+
+
 def line_for_user(name: str, secret: str, comment: str, blocked: bool) -> str:
     prefix = "# " if blocked else ""
     return f'{prefix}{name} = "{secret}"{quote_comment(comment)}'
@@ -830,8 +867,45 @@ def line_for_meta(name: str, added_at: str = "", updated_at: str = "", blocked_a
 
 
 def line_for_limit(name: str, limit: int, comment: str, blocked: bool) -> str:
-    prefix = "# " if blocked else ""
-    return f"{prefix}{name} = {limit}"
+    return f"{name} = {limit}"
+
+
+USER_CONTROLLED_SECTIONS = (
+    "access.user_enabled",
+    "access.user_max_unique_ips",
+    "access.user_max_tcp_conns",
+    "access.user_data_quota",
+    "access.user_expirations",
+    "access.user_rate_limits",
+)
+
+USER_RELATED_SECTIONS = USER_CONTROLLED_SECTIONS + (
+    "access.user_ad_tags",
+    "access.user_source_deny",
+)
+
+
+def blocked_comment(blocked_at: str) -> str:
+    return f"blocked_at={blocked_at}" if blocked_at else ""
+
+
+def strip_blocked_comment(comment: str) -> str:
+    comment = clean_comment(comment)
+    return "" if comment.startswith("blocked_at=") else comment
+
+
+def line_for_enabled(name: str, blocked_at: str) -> str:
+    return f"{name} = false{quote_comment(blocked_comment(blocked_at))}"
+
+
+def line_for_scalar(name: str, value: int | str) -> str:
+    if isinstance(value, int):
+        return f"{name} = {value}"
+    return f'{name} = "{value}"'
+
+
+def line_for_rate_limit(name: str, up_bps: int, down_bps: int) -> str:
+    return f"{name} = {{ up_bps = {up_bps}, down_bps = {down_bps} }}"
 
 
 def remove_key(lines: list[str], section: str, name: str) -> None:
@@ -839,6 +913,36 @@ def remove_key(lines: list[str], section: str, name: str) -> None:
     item = items.get(name)
     if item:
         lines.pop(item["line"])
+
+
+def remove_user_values(lines: list[str], name: str) -> None:
+    for section in USER_CONTROLLED_SECTIONS:
+        remove_key(lines, section, name)
+
+
+def remove_all_user_values(lines: list[str], name: str) -> None:
+    for section in USER_RELATED_SECTIONS:
+        remove_key(lines, section, name)
+
+
+def rename_key(lines: list[str], section: str, old_name: str, new_name: str) -> None:
+    items = parse_assignments(lines, section)
+    item = items.get(old_name)
+    if not item:
+        return
+    line_no = item["line"]
+    lines[line_no] = re.sub(rf"^(\s*#?\s*){re.escape(old_name)}(\s*=)", rf"\g<1>{new_name}\2", lines[line_no], count=1)
+
+
+def rename_unmanaged_user_values(lines: list[str], old_name: str, new_name: str) -> None:
+    for section in USER_RELATED_SECTIONS:
+        if section not in USER_CONTROLLED_SECTIONS:
+            rename_key(lines, section, old_name, new_name)
+
+
+def insert_section_line(lines: list[str], section: str, line: str) -> None:
+    _, end = ensure_section(lines, section)
+    lines.insert(end, line)
 
 
 def remove_user_with_meta(lines: list[str], name: str) -> int | None:
@@ -870,12 +974,13 @@ def upsert_user(data: UserInput, old_name: str | None = None) -> None:
         validate_name(old_name)
     secret = validate_secret(data.secret or generated_secret())
     comment = clean_comment(data.comment)
+    expiration = validate_expiration(data.expiration)
 
     text = read_config()
     lines = text.splitlines()
     ensure_section(lines, "access.users")
-    ensure_section(lines, "access.user_max_unique_ips")
     users = parse_assignments(lines, "access.users")
+    enabled_items = parse_assignments(lines, "access.user_enabled")
 
     target_exists = data.name in users and data.name != old_name
     if target_exists:
@@ -883,12 +988,15 @@ def upsert_user(data: UserInput, old_name: str | None = None) -> None:
 
     source_name = old_name or data.name
     source_item = users.get(source_name)
+    source_enabled = enabled_items.get(source_name)
     if old_name and old_name != data.name:
-        remove_key(lines, "access.user_max_unique_ips", old_name)
+        rename_unmanaged_user_values(lines, old_name, data.name)
+        remove_user_values(lines, old_name)
         insert_at = remove_user_with_meta(lines, old_name)
     elif old_name and old_name not in users:
         raise HTTPException(404, "Пользователь не найден.")
     elif source_item:
+        remove_user_values(lines, data.name)
         insert_at = remove_user_with_meta(lines, data.name)
     else:
         _, end = ensure_section(lines, "access.users")
@@ -899,17 +1007,31 @@ def upsert_user(data: UserInput, old_name: str | None = None) -> None:
     now = now_local().isoformat(timespec="seconds")
     added_at = source_item.get("added_at", "") if source_item else now
     updated_at = now if source_item else ""
-    was_blocked = bool(source_item and source_item.get("blocked"))
-    old_blocked_at = source_item.get("blocked_at", "") if source_item else ""
+    legacy_blocked = bool(source_item and source_item.get("blocked"))
+    enabled_value = parse_bool_value(source_enabled.get("value", "")) if source_enabled else None
+    was_blocked = legacy_blocked or enabled_value is False
+    preserve_legacy_block = data.blocked and legacy_blocked and source_enabled is None
+    old_blocked_at = (source_enabled.get("comment", "") if source_enabled else "") or (source_item.get("blocked_at", "") if source_item else "")
+    if old_blocked_at.startswith("blocked_at="):
+        old_blocked_at = old_blocked_at.split("=", 1)[1].strip()
     blocked_at = old_blocked_at if data.blocked and was_blocked else ""
     if data.blocked and not blocked_at:
         blocked_at = now
-    insert_user_with_meta(lines, insert_at, data.name, secret, comment, data.blocked, added_at, updated_at, blocked_at)
-
-    remove_key(lines, "access.user_max_unique_ips", data.name)
+    if not data.blocked:
+        comment = strip_blocked_comment(comment)
+    insert_user_with_meta(lines, insert_at, data.name, secret, comment, preserve_legacy_block, added_at, updated_at, old_blocked_at if preserve_legacy_block else "")
+    if data.blocked and not preserve_legacy_block:
+        insert_section_line(lines, "access.user_enabled", line_for_enabled(data.name, blocked_at))
     if data.limit > 0:
-        _, end = ensure_section(lines, "access.user_max_unique_ips")
-        lines.insert(end, line_for_limit(data.name, data.limit, comment, data.blocked))
+        insert_section_line(lines, "access.user_max_unique_ips", line_for_limit(data.name, data.limit, "", False))
+    if data.max_tcp_conns > 0:
+        insert_section_line(lines, "access.user_max_tcp_conns", line_for_scalar(data.name, data.max_tcp_conns))
+    if data.data_quota > 0:
+        insert_section_line(lines, "access.user_data_quota", line_for_scalar(data.name, data.data_quota))
+    if expiration:
+        insert_section_line(lines, "access.user_expirations", line_for_scalar(data.name, expiration))
+    if data.rate_limit_up > 0 or data.rate_limit_down > 0:
+        insert_section_line(lines, "access.user_rate_limits", line_for_rate_limit(data.name, data.rate_limit_up, data.rate_limit_down))
 
     write_config("\n".join(lines).rstrip() + "\n")
 
@@ -922,6 +1044,11 @@ def list_users(include_stats: bool = True, include_link: bool = False, metrics_s
     lines = text.splitlines()
     users = parse_assignments(lines, "access.users")
     limits = parse_assignments(lines, "access.user_max_unique_ips")
+    enabled_items = parse_assignments(lines, "access.user_enabled")
+    tcp_limits = parse_assignments(lines, "access.user_max_tcp_conns")
+    data_quotas = parse_assignments(lines, "access.user_data_quota")
+    expirations = parse_assignments(lines, "access.user_expirations")
+    rate_limits = parse_assignments(lines, "access.user_rate_limits")
     metrics: dict[str, dict[str, float]] = {}
     metrics_available = False
     if include_stats:
@@ -930,14 +1057,28 @@ def list_users(include_stats: bool = True, include_link: bool = False, metrics_s
     for name in sorted(users):
         u = users[name]
         limit_item = limits.get(name)
-        blocked = bool(u["blocked"] or (limit_item and limit_item["blocked"]))
+        enabled_item = enabled_items.get(name)
+        enabled_value = parse_bool_value(enabled_item.get("value", "")) if enabled_item else None
+        legacy_blocked = bool(u["blocked"] or (limit_item and limit_item["blocked"]))
+        blocked = legacy_blocked or enabled_value is False
+        blocked_at = ""
+        if enabled_item:
+            blocked_at = enabled_item.get("comment", "")
+            if blocked_at.startswith("blocked_at="):
+                blocked_at = blocked_at.split("=", 1)[1].strip()
+        if not blocked_at:
+            blocked_at = u["blocked_at"]
         limit = int(limit_item["value"]) if limit_item and str(limit_item["value"]).isdigit() else 0
+        max_tcp_conns = parse_int_value(tcp_limits.get(name, {}).get("value", 0))
+        data_quota = parse_int_value(data_quotas.get(name, {}).get("value", 0))
+        expiration = str(expirations.get(name, {}).get("value", "") or "")
+        rate_limit_up, rate_limit_down = parse_rate_limit_value(str(rate_limits.get(name, {}).get("value", "") or ""))
         comment = u["comment"]
         secret = validate_secret(str(u["value"]))
         link = make_link(secret, host, port, tls_domain) if include_link and host else ""
         stats = user_table_stats(metrics.get(name, {})) if metrics_available else user_table_stats({})
         qr = make_qr_data_uri(link) if include_link and link else ""
-        result.append(UserRecord(name, secret, limit, comment, blocked, u["added_at"], u["updated_at"], u["blocked_at"], stats, link, qr))
+        result.append(UserRecord(name, secret, limit, max_tcp_conns, data_quota, expiration, rate_limit_up, rate_limit_down, comment, blocked, u["added_at"], u["updated_at"], blocked_at, stats, link, qr))
     return result
 
 
@@ -945,6 +1086,11 @@ def user_table_payload(user: UserRecord) -> dict[str, Any]:
     return {
         "name": user.name,
         "limit": user.limit,
+        "max_tcp_conns": user.max_tcp_conns,
+        "data_quota": user.data_quota,
+        "expiration": user.expiration,
+        "rate_limit_up": user.rate_limit_up,
+        "rate_limit_down": user.rate_limit_down,
         "comment": user.comment,
         "blocked": user.blocked,
         "added_at": user.added_at,
@@ -959,6 +1105,11 @@ def user_detail_payload(user: UserRecord) -> dict[str, Any]:
         "name": user.name,
         "secret": user.secret,
         "limit": user.limit,
+        "max_tcp_conns": user.max_tcp_conns,
+        "data_quota": user.data_quota,
+        "expiration": user.expiration,
+        "rate_limit_up": user.rate_limit_up,
+        "rate_limit_down": user.rate_limit_down,
         "comment": user.comment,
         "blocked": user.blocked,
         "added_at": user.added_at,

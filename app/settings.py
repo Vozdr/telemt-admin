@@ -11,7 +11,7 @@ CONFIG_PATH = Path(os.getenv("TELEMT_CONFIG", "/data/telemt/config/config.toml")
 BACKUP_DIR = Path(os.getenv("TELEMT_BACKUP_DIR", "/data/backups"))
 MAX_BACKUPS = int(os.getenv("TELEMT_MAX_BACKUPS", "20"))
 APP_VERSION = os.getenv("TELEMT_ADMIN_VERSION", "dev")
-DEV_VERSION = os.getenv("TELEMT_ADMIN_DEV_VERSION", "1.3.0")
+DEV_VERSION = os.getenv("TELEMT_ADMIN_DEV_VERSION", "1.4.0")
 DISPLAY_VERSION = f"{DEV_VERSION} dev" if APP_VERSION == "dev" else APP_VERSION
 LOG_LEVEL = os.getenv("LOG_LEVEL", "ERROR")
 GITHUB_URL = "https://github.com/Vozdr/telemt-admin/"
@@ -67,7 +67,7 @@ META_RE = re.compile(
 )
 ASSIGN_RE = re.compile(
     r"^(?P<prefix>\s*)(?P<comment>#\s*)?(?P<key>[A-Za-z0-9_-]+)\s*=\s*"
-    r"(?P<value>\"(?:[^\"\\]|\\.)*\"|[0-9]+)\s*(?P<trail>#.*)?$"
+    r"(?P<value>.+?)\s*(?P<trail>#.*)?$"
 )
 ASSIGN_ANY_RE = re.compile(r"^\s*(?P<key>[A-Za-z0-9_-]+)\s*=\s*(?P<value>.+?)\s*(?:#.*)?$")
 DOC_META: dict[str, dict[str, dict[str, Any]]] = {"en": {}, "ru": {}}

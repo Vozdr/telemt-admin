@@ -20,7 +20,7 @@ Prometheus-метрики TeleMT.
 ## Возможности
 
 - Добавление, редактирование, блокировка/разблокировка и удаление пользователей TeleMT.
-- Настройка лимита уникальных IP для пользователя.
+- Настройка пользовательских лимитов IP, TCP, трафика, срока действия и скорости.
 - Просмотр и редактирование системных настроек TeleMT из `config.toml`.
 - Генерация ссылок и QR-кодов.
 - Просмотр пользовательских и общих метрик TeleMT.
@@ -100,15 +100,15 @@ services:
     image: w03zd8rc/telemt-admin:latest
     container_name: telemt-admin
     restart: unless-stopped
-    # Рекомендуется, если TeleMT отдает метрики только на loopback.
-    network_mode: "container:telemt"
+    # Раскомментируйте, если TeleMT отдает метрики только на loopback.
+    # network_mode: "container:telemt"
     environment:
       ENABLE_WEB_AUTH: "yes"
       WEB_ADMIN_USER: admin
       WEB_ADMIN_PASS: change-me
       ENABLE_BASIC_AUTH: "no"
       TELEMT_CONFIG: /data/telemt/config/config.toml
-      TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
+      TELEMT_METRICS_URL: http://telemt:9090/metrics
       ENABLE_METRICS: "yes"
       READ_ONLY: "no"
       DEFAULT_THEME: dark
@@ -117,8 +117,10 @@ services:
     volumes:
       - /data/telemt/config:/data/telemt/config:rw
       - /data/telemt-admin/backups:/data/backups:rw
-    # При network_mode: container:telemt порт 8080 должен быть доступен через
-    # контейнер TeleMT или через другой контейнер той же сетевой namespace.
+    # При network_mode: container:telemt используйте:
+    # TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
+    # Порт 8080 должен быть доступен через контейнер TeleMT или через другой
+    # контейнер той же сетевой namespace.
 ```
 
 ## Переменные окружения
@@ -224,6 +226,21 @@ Auth, затем web-форму входа.
 
 Перед каждой записью в `config.toml` админка копирует предыдущую версию конфига
 в `TELEMT_BACKUP_DIR`. Старые копии удаляются, чтобы осталось не больше `TELEMT_MAX_BACKUPS`.
+
+## Пользовательские лимиты
+
+Окно редактирования пользователя умеет управлять секциями TeleMT:
+
+- `[access.user_max_unique_ips]`
+- `[access.user_max_tcp_conns]`
+- `[access.user_data_quota]`
+- `[access.user_expirations]`
+- `[access.user_rate_limits]`
+
+Для новых изменений блокировка выполняется через `[access.user_enabled]`.
+Старые пользователи, закомментированные в `[access.users]`, по-прежнему
+отображаются как заблокированные. При разблокировке через интерфейс строка
+раскомментируется, а старая служебная дата блокировки удаляется.
 
 ## Поведение метрик
 

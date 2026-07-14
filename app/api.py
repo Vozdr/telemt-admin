@@ -105,14 +105,42 @@ def create_api_router(ctx: Any) -> APIRouter:
         ctx.ensure_config_writable()
         user = ctx.find_user(name, include_stats=False)
         new_secret = ctx.validate_secret(data.secret or ctx.generated_secret())
-        ctx.upsert_user(ctx.UserInput(name=user.name, secret=new_secret, limit=user.limit, comment=user.comment, blocked=user.blocked), old_name=name)
+        ctx.upsert_user(
+            ctx.UserInput(
+                name=user.name,
+                secret=new_secret,
+                limit=user.limit,
+                max_tcp_conns=user.max_tcp_conns,
+                data_quota=user.data_quota,
+                expiration=user.expiration,
+                rate_limit_up=user.rate_limit_up,
+                rate_limit_down=user.rate_limit_down,
+                comment=user.comment,
+                blocked=user.blocked,
+            ),
+            old_name=name,
+        )
         return {"ok": True}
 
     @router.post("/users/{name}/blocked")
     def api_toggle_user(name: str, data: ctx.ToggleInput, _: None = Depends(ctx.require_auth)) -> dict[str, Any]:
         ctx.ensure_config_writable()
         user = ctx.find_user(name, include_stats=False)
-        ctx.upsert_user(ctx.UserInput(name=user.name, secret=user.secret, limit=user.limit, comment=user.comment, blocked=data.blocked), old_name=name)
+        ctx.upsert_user(
+            ctx.UserInput(
+                name=user.name,
+                secret=user.secret,
+                limit=user.limit,
+                max_tcp_conns=user.max_tcp_conns,
+                data_quota=user.data_quota,
+                expiration=user.expiration,
+                rate_limit_up=user.rate_limit_up,
+                rate_limit_down=user.rate_limit_down,
+                comment=user.comment,
+                blocked=data.blocked,
+            ),
+            old_name=name,
+        )
         return {"ok": True}
 
     @router.delete("/users/{name}")
@@ -123,7 +151,7 @@ def create_api_router(ctx: Any) -> APIRouter:
         lines = text.splitlines()
         if name not in ctx.parse_assignments(lines, "access.users"):
             raise HTTPException(404, "Пользователь не найден.")
-        ctx.remove_key(lines, "access.user_max_unique_ips", name)
+        ctx.remove_all_user_values(lines, name)
         ctx.remove_user_with_meta(lines, name)
         ctx.write_config("\n".join(lines).rstrip() + "\n")
         return {"ok": True}

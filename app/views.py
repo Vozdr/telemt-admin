@@ -201,6 +201,7 @@ PAGE = r"""
     button:disabled { opacity: .45; cursor: not-allowed; }
     button:disabled:hover { text-decoration: none; }
     button.icon, a.button-link.icon { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; }
+    .icon-svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     button.icon.large { width: 42px; height: 38px; font-size: 18px; }
     button.header-stat { min-width: 40px; height: 20px; flex: 0 0 auto; transform: translateY(2px); }
     button.header-stat:hover { background: var(--hover); border-color: var(--line-strong); }
@@ -239,6 +240,10 @@ PAGE = r"""
     .pill small { display: block; font-size: 11px; line-height: 1.15; opacity: .78; }
     .pill.ok { color: var(--ok); border-color: var(--line); background: var(--accent-soft); }
     .pill.off { height: auto; min-height: 30px; align-items: flex-start; flex-direction: column; justify-content: center; gap: 1px; color: var(--muted); background: var(--soft); white-space: normal; }
+    td.limits-td { padding-top: 2px; padding-bottom: 2px; }
+    .limits-cell { display: inline-grid; gap: 2px; align-items: center; justify-items: start; }
+    .limit-pill { display: inline-flex; align-items: center; min-height: 18px; border-radius: 999px; padding: 0 7px; border: 1px solid var(--line); background: var(--control); color: var(--ink); font-size: 12px; line-height: 1.15; white-space: nowrap; }
+    .limit-empty { color: var(--muted); font-size: 13px; }
     .stat-cell { color: var(--muted); font-size: 13px; }
     td.stat-td { padding-top: 2px; padding-bottom: 2px; }
     .stat-button, .stat-text { height: auto; min-height: 24px; border: 0; border-radius: 5px; background: transparent; padding: 2px 4px; color: var(--ink); font-size: 13px; line-height: 1.25; text-align: left; display: grid; justify-items: start; gap: 1px; }
@@ -259,11 +264,18 @@ PAGE = r"""
     .modal-head h2 { margin: 0; font-size: 18px; letter-spacing: 0; }
     .modal-body { padding: 18px; }
     .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--line); background: var(--soft); }
+    .modal-foot .danger { margin-right: auto; }
     label { display: block; color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+    .label-help { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 13px; margin: 0 0 6px; }
+    .help-mark { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; font-weight: 800; cursor: help; }
     input, textarea { width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 10px 11px; font: inherit; color: var(--ink); background: var(--control); }
     textarea { min-height: 76px; resize: vertical; }
     .grid { display: grid; grid-template-columns: 1fr 140px; gap: 14px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .user-limits-grid { display: grid; grid-template-columns: minmax(86px, 1fr) minmax(86px, 1fr) minmax(220px, 2fr); gap: 14px; align-items: end; }
     .field { margin-bottom: 14px; }
+    .unit-row { display: grid; grid-template-columns: 1fr 96px; gap: 8px; }
+    .datetime-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 8px; }
     .checkline { display: flex; gap: 9px; align-items: center; }
     .checkline input { width: auto; }
     .secret-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
@@ -383,7 +395,13 @@ PAGE = r"""
           <option value="light" data-i18n="theme.light">Light</option>
           <option value="dark" data-i18n="theme.dark">Dark</option>
         </select>
-        <a class="button-link icon" id="logoutBtn" href="logout" data-i18n-title="common.logout" title="Logout" __WEB_AUTH_HIDDEN__>↪</a>
+        <a class="button-link icon" id="logoutBtn" href="logout" data-i18n-title="common.logout" title="Logout" __WEB_AUTH_HIDDEN__ aria-label="Logout">
+          <svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"></path>
+            <path d="M14 16l4-4-4-4"></path>
+            <path d="M18 12H9"></path>
+          </svg>
+        </a>
       </div>
     </header>
 
@@ -391,7 +409,7 @@ PAGE = r"""
       <div class="metric filter active" data-filter="all"><b id="mTotal">0</b><span data-i18n="filters.total">Всего пользователей</span></div>
       <div class="metric filter" data-filter="active"><b id="mActive">0</b><span data-i18n="filters.active">Активны</span></div>
       <div class="metric filter" data-filter="blocked"><b id="mBlocked">0</b><span data-i18n="filters.blocked">Заблокированы</span></div>
-      <div class="metric filter" data-filter="limited"><b id="mLimited">0</b><span data-i18n="filters.limited">С лимитом IP</span></div>
+      <div class="metric filter" data-filter="limited"><b id="mLimited">0</b><span data-i18n="filters.limited">С лимитами</span></div>
     </section>
 
     <section class="table-wrap">
@@ -402,7 +420,7 @@ PAGE = r"""
             <th class="sortable" data-sort="comment" data-i18n="table.comment">Комментарий</th>
             <th class="sortable" data-sort="stats" style="width: 120px" data-i18n="table.stats">Статистика</th>
             <th class="sortable" data-sort="added" style="width: 155px" data-i18n="table.added">Добавлен</th>
-            <th class="sortable" data-sort="limit" style="width: 110px" data-i18n="table.limit">Лимит IP</th>
+            <th class="sortable" data-sort="limit" style="width: 135px" data-i18n="table.limit">Лимиты</th>
             <th class="sortable" data-sort="status" style="width: 150px" data-i18n="table.status">Статус</th>
           </tr>
         </thead>
@@ -439,21 +457,70 @@ PAGE = r"""
         <button type="button" class="icon" data-close="editDialog" data-i18n-title="common.close" title="Закрыть">×</button>
       </div>
       <div class="modal-body">
-        <div class="grid">
-          <div class="field">
-            <label for="name" data-i18n="form.name">Имя</label>
-            <input id="name" name="name" autocomplete="off" required pattern="[A-Za-z0-9_\-]{1,64}">
-          </div>
-          <div class="field">
-            <label for="limit" data-i18n="form.limit">Лимит IP</label>
-            <input id="limit" name="limit" type="number" min="0" max="100000" value="0">
-          </div>
+        <div class="field">
+          <label for="name" data-i18n="form.name">Имя</label>
+          <input id="name" name="name" autocomplete="off" required pattern="[A-Za-z0-9_-]{1,64}">
         </div>
         <div class="field">
           <label for="secret" data-i18n="form.secret">Secret</label>
           <div class="secret-row">
             <input id="secret" name="secret" autocomplete="off" pattern="[0-9a-fA-F]{32}">
             __USER_GEN_SECRET_BUTTON__
+          </div>
+        </div>
+        <div class="user-limits-grid">
+          <div class="field">
+            <label class="label-help" for="limit"><span data-i18n="form.limit">Лимит IP</span><span class="help-mark" data-i18n-tip="help.limit" data-tip="Maximum simultaneous unique IP addresses for this user. 0 means no limit.">?</span></label>
+            <input id="limit" name="limit" type="number" min="0" max="100000" value="0">
+          </div>
+          <div class="field">
+            <label class="label-help" for="maxTcpConns"><span data-i18n="form.maxTcpConns">TCP limit</span><span class="help-mark" data-i18n-tip="help.maxTcpConns" data-tip="Maximum simultaneous TCP connections for this user. 0 means no per-user override.">?</span></label>
+            <input id="maxTcpConns" name="maxTcpConns" type="number" min="0" max="1000000" value="0">
+          </div>
+          <div class="field">
+            <label class="label-help" for="expirationDate"><span data-i18n="form.expiration">Expiration</span><span class="help-mark" data-i18n-tip="help.expiration" data-tip="User expiration date and time. Empty means no expiration. Stored in config.toml as RFC3339.">?</span></label>
+            <div class="datetime-row">
+              <input id="expirationDate" name="expirationDate" type="date">
+              <input id="expirationTime" name="expirationTime" type="time" step="60">
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label class="label-help" for="dataQuotaValue"><span data-i18n="form.dataQuota">Traffic quota</span><span class="help-mark" data-i18n-tip="help.dataQuota" data-tip="Total traffic quota for this user. 0 means no quota. Stored in config.toml as bytes.">?</span></label>
+          <div class="unit-row">
+            <input id="dataQuotaValue" name="dataQuotaValue" type="number" min="0" step="1" value="0">
+            <select id="dataQuotaUnit" name="dataQuotaUnit">
+              <option value="1" data-i18n="unit.b">B</option>
+              <option value="1024" data-i18n="unit.kb">KB</option>
+              <option value="1048576" selected data-i18n="unit.mb">MB</option>
+              <option value="1073741824" data-i18n="unit.gb">GB</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="field">
+            <label class="label-help" for="rateLimitUpValue"><span data-i18n="form.rateLimitUp">Rate up</span><span class="help-mark" data-i18n-tip="help.rateLimitUp" data-tip="Upload speed limit for this user. 0 means no limit. Stored as bits per second.">?</span></label>
+            <div class="unit-row">
+              <input id="rateLimitUpValue" name="rateLimitUpValue" type="number" min="0" step="1" value="0">
+              <select id="rateLimitUpUnit" name="rateLimitUpUnit">
+                <option value="1" data-i18n="unit.bps">bps</option>
+                <option value="1000" data-i18n="unit.kbps">Kbps</option>
+                <option value="1000000" selected data-i18n="unit.mbps">Mbps</option>
+                <option value="1000000000" data-i18n="unit.gbps">Gbps</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label class="label-help" for="rateLimitDownValue"><span data-i18n="form.rateLimitDown">Rate down</span><span class="help-mark" data-i18n-tip="help.rateLimitDown" data-tip="Download speed limit for this user. 0 means no limit. Stored as bits per second.">?</span></label>
+            <div class="unit-row">
+              <input id="rateLimitDownValue" name="rateLimitDownValue" type="number" min="0" step="1" value="0">
+              <select id="rateLimitDownUnit" name="rateLimitDownUnit">
+                <option value="1" data-i18n="unit.bps">bps</option>
+                <option value="1000" data-i18n="unit.kbps">Kbps</option>
+                <option value="1000000" selected data-i18n="unit.mbps">Mbps</option>
+                <option value="1000000000" data-i18n="unit.gbps">Gbps</option>
+              </select>
+            </div>
           </div>
         </div>
         <div class="field">
@@ -464,6 +531,7 @@ PAGE = r"""
       </div>
       <div class="modal-foot">
         __USER_DELETE_BUTTON__
+        <button type="button" id="clearLimitsBtn" data-i18n="form.clearLimits">Очистить лимиты</button>
         <button type="button" id="editCloseBtn" data-close="editDialog" data-i18n="common.cancel">Отмена</button>
         __USER_SAVE_BUTTON__
       </div>
@@ -632,6 +700,9 @@ PAGE = r"""
       document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
         el.placeholder = t(el.dataset.i18nPlaceholder);
       });
+      document.querySelectorAll("[data-i18n-tip]").forEach(el => {
+        el.dataset.tip = t(el.dataset.i18nTip);
+      });
       document.documentElement.lang = state.lang || "en";
       render();
       if ($("configDialog") && $("configDialog").open && state.config) {
@@ -759,7 +830,7 @@ PAGE = r"""
 
     function setEditPending(pending, activeButton) {
       state.editPending = pending;
-      ["saveBtn", "deleteBtn", "editCloseBtn", "genSecret"].forEach(id => {
+      ["saveBtn", "deleteBtn", "editCloseBtn", "genSecret", "clearLimitsBtn"].forEach(id => {
         const el = $(id);
         if (el === activeButton) setButtonBusy(el, pending);
         else setControlDisabled(el, pending);
@@ -779,6 +850,62 @@ PAGE = r"""
       crypto.getRandomValues(bytes);
       return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
     }
+
+    function splitUnitValue(raw, units, fallback) {
+      const value = Number(raw || 0);
+      const preferred = units.find(item => item.mult === fallback) || units[0];
+      if (!value) return { value: 0, unit: preferred.mult };
+      for (const item of [...units].sort((a, b) => b.mult - a.mult)) {
+        if (value >= item.mult && value % item.mult === 0) {
+          return { value: value / item.mult, unit: item.mult };
+        }
+      }
+      return { value, unit: 1 };
+    }
+
+    function setUnitValue(valueId, unitId, raw, units, fallback) {
+      const item = splitUnitValue(raw, units, fallback);
+      $(valueId).value = item.value;
+      $(unitId).value = String(item.unit);
+    }
+
+    function readUnitValue(valueId, unitId) {
+      const value = Number($(valueId).value || 0);
+      const unit = Number($(unitId).value || 1);
+      return Math.max(0, Math.round(value * unit));
+    }
+
+    function toDateTimeParts(value) {
+      if (!value) return { date: "", time: "" };
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        const raw = String(value);
+        return { date: raw.slice(0, 10), time: raw.slice(11, 16) || "" };
+      }
+      const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+      const iso = local.toISOString();
+      return { date: iso.slice(0, 10), time: iso.slice(11, 16) };
+    }
+
+    function setDateTimeFields(value) {
+      const parts = toDateTimeParts(value);
+      $("expirationDate").value = parts.date || "";
+      $("expirationTime").value = parts.time || "";
+    }
+
+    function readDateTimeFields() {
+      const dateValue = $("expirationDate").value.trim();
+      const timeValue = $("expirationTime").value.trim();
+      if (!dateValue) return "";
+      const timePart = timeValue || "00:00:00";
+      const normalizedTime = timePart.length === 5 ? `${timePart}:00` : timePart;
+      const date = new Date(`${dateValue}T${normalizedTime}`);
+      if (Number.isNaN(date.getTime())) return "";
+      return date.toISOString().replace(".000Z", "Z");
+    }
+
+    const DATA_UNITS = [{ mult: 1 }, { mult: 1024 }, { mult: 1048576 }, { mult: 1073741824 }];
+    const RATE_UNITS = [{ mult: 1 }, { mult: 1000 }, { mult: 1000000 }, { mult: 1000000000 }];
 
     async function load() {
       if (state.loadingUsers) return;
@@ -813,7 +940,7 @@ PAGE = r"""
     function filteredUsers() {
       if (state.filter === "active") return state.users.filter(u => !u.blocked);
       if (state.filter === "blocked") return state.users.filter(u => u.blocked);
-      if (state.filter === "limited") return state.users.filter(u => u.limit > 0);
+      if (state.filter === "limited") return state.users.filter(hasUserLimits);
       return state.users;
     }
 
@@ -867,7 +994,7 @@ PAGE = r"""
       if (key === "name") return u.name.toLowerCase();
       if (key === "comment") return (u.comment || "").toLowerCase();
       if (key === "added") return u.added_at || "";
-      if (key === "limit") return Number(u.limit || 0);
+      if (key === "limit") return userLimitSortValue(u);
       return "";
     }
 
@@ -930,6 +1057,19 @@ PAGE = r"""
       return date.toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
     }
 
+    function formatExpirationLimit(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      const locale = state.lang === "ru" ? "ru-RU" : "en-US";
+      const day = date.toLocaleDateString(locale, { day: "2-digit", month: "2-digit", year: "2-digit" });
+      const hours = date.getHours();
+      const minutes = date.getMinutes();
+      if (hours === 0 && minutes === 0) return `${t("limits.until")} ${day}`;
+      const time = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+      return `${t("limits.until")} ${day} ${time}`;
+    }
+
     function formatFullDate(value) {
       if (!value) return "N/A";
       const date = new Date(value);
@@ -946,11 +1086,79 @@ PAGE = r"""
         value /= 1024;
         unit += 1;
       }
-      return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+      return `${Math.round(value)} ${units[unit]}`;
+    }
+
+    function formatRateBps(value) {
+      const units = [
+        [1000000000, t("unit.gbpsShort")],
+        [1000000, t("unit.mbpsShort")],
+        [1000, t("unit.kbpsShort")],
+        [1, t("unit.bpsShort")]
+      ];
+      const raw = Number(value || 0);
+      for (const [mult, label] of units) {
+        if (raw >= mult || mult === 1) {
+          const number = raw / mult;
+          return `${Math.round(number)}${label}`;
+        }
+      }
+      return `0${t("unit.bpsShort")}`;
     }
 
     function formatNumber(value) {
       return Number(value || 0).toLocaleString(state.lang === "ru" ? "ru-RU" : "en-US");
+    }
+
+    function hasUserLimits(u) {
+      return Number(u.limit || 0) > 0
+        || Number(u.max_tcp_conns || 0) > 0
+        || Number(u.data_quota || 0) > 0
+        || Boolean(u.expiration)
+        || Number(u.rate_limit_up || 0) > 0
+        || Number(u.rate_limit_down || 0) > 0;
+    }
+
+    function userLimitSortValue(u) {
+      return [
+        hasUserLimits(u) ? 1 : 0,
+        Number(u.limit || 0),
+        Number(u.max_tcp_conns || 0),
+        Date.parse(u.expiration || "") || 0,
+        Number(u.data_quota || 0),
+        Number(u.rate_limit_up || 0),
+        Number(u.rate_limit_down || 0)
+      ].join("|");
+    }
+
+    function renderLimitsCell(cell, u) {
+      cell.innerHTML = "";
+      const box = document.createElement("div");
+      box.className = "limits-cell";
+      const items = [];
+      if (Number(u.limit || 0) > 0) items.push(`${formatNumber(u.limit)} IP`);
+      if (Number(u.max_tcp_conns || 0) > 0) items.push(`${formatNumber(u.max_tcp_conns)} TCP`);
+      if (u.expiration) items.push(formatExpirationLimit(u.expiration));
+      if (Number(u.data_quota || 0) > 0) items.push(`Σ ${formatBytes(u.data_quota)}`);
+      const up = Number(u.rate_limit_up || 0);
+      const down = Number(u.rate_limit_down || 0);
+      if (up > 0 && down > 0) items.push(`↑ ${formatRateBps(up)}/↓ ${formatRateBps(down)}`);
+      else if (up > 0) items.push(`↑ ${formatRateBps(up)}`);
+      else if (down > 0) items.push(`↓ ${formatRateBps(down)}`);
+      if (!items.length) {
+        const empty = document.createElement("span");
+        empty.className = "limit-empty";
+        empty.textContent = "—";
+        box.appendChild(empty);
+      } else {
+        for (const item of items) {
+          const pill = document.createElement("span");
+          pill.className = "limit-pill";
+          pill.textContent = item;
+          box.appendChild(pill);
+        }
+      }
+      cell.appendChild(box);
     }
 
     function formatDuration(seconds) {
@@ -1044,7 +1252,7 @@ PAGE = r"""
       $("empty").hidden = visible.length > 0;
       const active = state.users.filter(u => !u.blocked).length;
       const blocked = state.users.length - active;
-      const limited = state.users.filter(u => u.limit > 0).length;
+      const limited = state.users.filter(hasUserLimits).length;
       $("mTotal").textContent = state.users.length;
       $("mActive").textContent = active;
       $("mBlocked").textContent = blocked;
@@ -1068,7 +1276,7 @@ PAGE = r"""
           <td><div class="comment"></div></td>
           <td class="stat-td"></td>
           <td><div class="date-cell"></div></td>
-          <td><span class="pill"></span></td>
+          <td class="limits-td"></td>
           <td><div class="status-cell">__USER_TOGGLE_BUTTON__<span class="pill ${u.blocked ? "off" : "ok"}">${u.blocked ? t("status.blocked") : t("status.active")}</span></div></td>`;
         tr.querySelector(".name").textContent = u.name;
         const editBtn = tr.querySelector('[data-act="edit"]');
@@ -1077,7 +1285,7 @@ PAGE = r"""
         tr.querySelector(".comment").textContent = u.comment || "—";
         const statsEl = renderStatCell(tr.querySelector(".stat-td"), u.stats);
         tr.querySelector(".date-cell").innerHTML = `<span class="date-help">${esc(formatDate(u.added_at))}<span class="tip">${esc(t("date.lastChanged"))}: ${esc(formatDate(u.updated_at))}</span></span>`;
-        tr.querySelector("td:nth-child(5) .pill").textContent = u.limit > 0 ? `${u.limit} IP` : t("table.noLimit");
+        renderLimitsCell(tr.querySelector(".limits-td"), u);
         if (u.blocked && u.blocked_at) {
           tr.querySelector(".status-cell .pill").innerHTML = `${esc(t("status.blocked"))}<small>${esc(formatDate(u.blocked_at))}</small>`;
         }
@@ -1104,6 +1312,11 @@ PAGE = r"""
       if ($("deleteBtn")) $("deleteBtn").hidden = true;
       $("name").value = "";
       $("limit").value = "0";
+      $("maxTcpConns").value = "0";
+      setDateTimeFields("");
+      setUnitValue("dataQuotaValue", "dataQuotaUnit", 0, DATA_UNITS, 1048576);
+      setUnitValue("rateLimitUpValue", "rateLimitUpUnit", 0, RATE_UNITS, 1000000);
+      setUnitValue("rateLimitDownValue", "rateLimitDownUnit", 0, RATE_UNITS, 1000000);
       $("secret").value = randomSecret();
       $("comment").value = "";
       $("blocked").checked = false;
@@ -1112,14 +1325,22 @@ PAGE = r"""
     }
 
     function setEditReadonly(readonly) {
-      ["name", "limit", "secret", "comment"].forEach(id => {
+      ["name", "limit", "maxTcpConns", "expirationDate", "expirationTime", "dataQuotaValue", "rateLimitUpValue", "rateLimitDownValue", "secret", "comment"].forEach(id => {
         $(id).readOnly = readonly;
+      });
+      ["dataQuotaUnit", "rateLimitUpUnit", "rateLimitDownUnit"].forEach(id => {
+        $(id).disabled = readonly;
       });
       $("blocked").disabled = readonly;
       if ($("genSecret")) {
         $("genSecret").hidden = readonly;
         $("genSecret").style.display = readonly ? "none" : "";
         $("genSecret").disabled = readonly;
+      }
+      if ($("clearLimitsBtn")) {
+        $("clearLimitsBtn").hidden = readonly;
+        $("clearLimitsBtn").style.display = readonly ? "none" : "";
+        $("clearLimitsBtn").disabled = readonly;
       }
       if ($("deleteBtn")) {
         $("deleteBtn").hidden = readonly || !state.editing;
@@ -1144,6 +1365,11 @@ PAGE = r"""
         $("editTitle").textContent = `${state.configWritable ? t("modal.editUser") : t("modal.viewUser")}: ${state.editing}`;
         $("name").value = user.name || u.name;
         $("limit").value = user.limit ?? u.limit ?? 0;
+        $("maxTcpConns").value = user.max_tcp_conns ?? 0;
+        setDateTimeFields(user.expiration || "");
+        setUnitValue("dataQuotaValue", "dataQuotaUnit", user.data_quota || 0, DATA_UNITS, 1048576);
+        setUnitValue("rateLimitUpValue", "rateLimitUpUnit", user.rate_limit_up || 0, RATE_UNITS, 1000000);
+        setUnitValue("rateLimitDownValue", "rateLimitDownUnit", user.rate_limit_down || 0, RATE_UNITS, 1000000);
         $("secret").value = user.secret || "";
         $("comment").value = user.comment || "";
         $("blocked").checked = Boolean(user.blocked);
@@ -1161,9 +1387,24 @@ PAGE = r"""
         name: $("name").value.trim(),
         secret: $("secret").value.trim().toLowerCase(),
         limit: Number($("limit").value || 0),
+        max_tcp_conns: Number($("maxTcpConns").value || 0),
+        data_quota: readUnitValue("dataQuotaValue", "dataQuotaUnit"),
+        expiration: readDateTimeFields(),
+        rate_limit_up: readUnitValue("rateLimitUpValue", "rateLimitUpUnit"),
+        rate_limit_down: readUnitValue("rateLimitDownValue", "rateLimitDownUnit"),
         comment: $("comment").value.trim(),
         blocked: $("blocked").checked
       };
+    }
+
+    function clearUserLimits() {
+      if (!state.configWritable) return;
+      $("limit").value = "0";
+      $("maxTcpConns").value = "0";
+      setDateTimeFields("");
+      setUnitValue("dataQuotaValue", "dataQuotaUnit", 0, DATA_UNITS, 1048576);
+      setUnitValue("rateLimitUpValue", "rateLimitUpUnit", 0, RATE_UNITS, 1000000);
+      setUnitValue("rateLimitDownValue", "rateLimitDownUnit", 0, RATE_UNITS, 1000000);
     }
 
     async function saveUser(ev) {
@@ -1817,6 +2058,8 @@ PAGE = r"""
       clearTimeout(tipHideTimer);
       tipActiveTarget = target;
       const tipEl = $("floatTip");
+      const host = target.closest("dialog") || document.body;
+      if (tipEl.parentElement !== host) host.appendChild(tipEl);
       const url = target.dataset.tipUrl || "";
       tipEl.innerHTML = `<div>${esc(text)}</div>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(t("config.detailsLink"))}</a>` : ""}`;
       tipEl.classList.add("show");
@@ -1876,6 +2119,7 @@ PAGE = r"""
       if (!state.configWritable || $("genSecret").disabled) return;
       $("secret").value = randomSecret();
     };
+    if ($("clearLimitsBtn")) $("clearLimitsBtn").onclick = clearUserLimits;
     if ($("deleteBtn")) $("deleteBtn").onclick = () => state.editing && deleteUser({ name: state.editing });
     $("copyBtn").onclick = async () => {
       await navigator.clipboard.writeText($("linkText").value);

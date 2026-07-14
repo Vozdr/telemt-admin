@@ -19,7 +19,7 @@ per-user and global TeleMT Prometheus metrics.
 ## Features
 
 - Add, edit, block/unblock and delete TeleMT users.
-- Edit per-user unique IP limits.
+- Edit per-user IP, TCP, traffic quota, expiration and rate limits.
 - View and edit TeleMT system settings from `config.toml`.
 - Generate proxy links and QR codes.
 - View user and global TeleMT metrics.
@@ -100,15 +100,15 @@ services:
     image: w03zd8rc/telemt-admin:latest
     container_name: telemt-admin
     restart: unless-stopped
-    # Recommended when TeleMT metrics are loopback-only.
-    network_mode: "container:telemt"
+    # Uncomment when TeleMT metrics are loopback-only.
+    # network_mode: "container:telemt"
     environment:
       ENABLE_WEB_AUTH: "yes"
       WEB_ADMIN_USER: admin
       WEB_ADMIN_PASS: change-me
       ENABLE_BASIC_AUTH: "no"
       TELEMT_CONFIG: /data/telemt/config/config.toml
-      TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
+      TELEMT_METRICS_URL: http://telemt:9090/metrics
       ENABLE_METRICS: "yes"
       READ_ONLY: "no"
       DEFAULT_THEME: dark
@@ -117,9 +117,10 @@ services:
     volumes:
       - /data/telemt/config:/data/telemt/config:rw
       - /data/telemt-admin/backups:/data/backups:rw
-    # With network_mode: container:telemt, expose/publish port 8080 from
-    # the TeleMT container or reach it through another container in the same
-    # Docker network via http://telemt:8080.
+    # With network_mode: container:telemt, use:
+    # TELEMT_METRICS_URL: http://127.0.0.1:9090/metrics
+    # Expose/publish port 8080 from the TeleMT container or reach it through
+    # another container in the same network namespace.
 ```
 
 ## Environment variables
@@ -223,6 +224,20 @@ API endpoints return an error.
 
 Before every write to `config.toml`, the admin panel copies the previous config
 to `TELEMT_BACKUP_DIR`. Old backups are pruned to `TELEMT_MAX_BACKUPS`.
+
+## User limits
+
+The user editor can manage these TeleMT per-user sections:
+
+- `[access.user_max_unique_ips]`
+- `[access.user_max_tcp_conns]`
+- `[access.user_data_quota]`
+- `[access.user_expirations]`
+- `[access.user_rate_limits]`
+
+Blocking uses `[access.user_enabled]` for new changes. Legacy commented users in
+`[access.users]` are still shown as blocked; unblocking them through the UI
+uncomments the user and removes old block metadata.
 
 ## Metrics behavior
 
