@@ -10,6 +10,11 @@ class UserInput(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     secret: str | None = None
     limit: int = Field(default=0, ge=0, le=100000)
+    max_tcp_conns: int = Field(default=0, ge=0, le=1000000)
+    data_quota: int = Field(default=0, ge=0)
+    expiration: str = Field(default="", max_length=64)
+    rate_limit_up: int = Field(default=0, ge=0)
+    rate_limit_down: int = Field(default=0, ge=0)
     comment: str = Field(default="", max_length=200)
     blocked: bool = False
 
@@ -43,6 +48,11 @@ class UserRecord:
     name: str
     secret: str
     limit: int
+    max_tcp_conns: int
+    data_quota: int
+    expiration: str
+    rate_limit_up: int
+    rate_limit_down: int
     comment: str
     blocked: bool
     added_at: str
