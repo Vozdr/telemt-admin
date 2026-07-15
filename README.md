@@ -10,11 +10,11 @@ per-user and global TeleMT Prometheus metrics.
 
 ## Screenshots
 
-![TeleMT Admin light overview](docs/screenshots/en-overview-light.png)
+![TeleMT Admin light overview](docs/screenshots/en-overview-light.png?v=1.4.2)
 
-![TeleMT Admin dark overview](docs/screenshots/en-overview-dark.png)
+![TeleMT Admin dark overview](docs/screenshots/en-overview-dark.png?v=1.4.2)
 
-![User statistics modal](docs/screenshots/en-user-stats-dark.png)
+![User settings modal](docs/screenshots/en-user-conf-dark.png?v=1.4.2)
 
 ## Features
 

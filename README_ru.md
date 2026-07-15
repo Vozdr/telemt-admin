@@ -11,11 +11,11 @@ Prometheus-метрики TeleMT.
 
 ## Скриншоты
 
-![Главный экран TeleMT Admin, светлая тема](docs/screenshots/ru-overview-light.png)
+![Главный экран TeleMT Admin, светлая тема](docs/screenshots/ru-overview-light.png?v=1.4.2)
 
-![Главный экран TeleMT Admin, тёмная тема](docs/screenshots/ru-overview-dark.png)
+![Главный экран TeleMT Admin, тёмная тема](docs/screenshots/ru-overview-dark.png?v=1.4.2)
 
-![Модальное окно статистики пользователя](docs/screenshots/ru-user-stats-dark.png)
+![Модальное окно настроек пользователя](docs/screenshots/ru-user-conf-dark.png?v=1.4.2)
 
 ## Возможности
 
