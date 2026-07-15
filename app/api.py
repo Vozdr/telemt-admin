@@ -7,11 +7,11 @@ def create_api_router(ctx: Any) -> APIRouter:
     router = APIRouter(prefix="/api")
 
     @router.get("/i18n")
-    def api_i18n_list(_: None = Depends(ctx.require_auth)) -> dict[str, Any]:
+    def api_i18n_list() -> dict[str, Any]:
         return {"locales": ctx.available_locales(), "default": ctx.DEFAULT_LANG}
 
     @router.get("/i18n/{lang}")
-    def api_i18n(lang: str, _: None = Depends(ctx.require_auth)) -> dict[str, Any]:
+    def api_i18n(lang: str) -> dict[str, Any]:
         lang = "".join(ch for ch in lang if ch.isalnum() or ch in {"_", "-"})
         path = ctx.LOCALES_DIR / f"{lang}.json"
         if not path.exists():
