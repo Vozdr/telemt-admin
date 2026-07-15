@@ -1174,18 +1174,58 @@ def available_locales() -> list[dict[str, str]]:
     return result
 
 
-def render_login_page(error: bool = False) -> str:
+def safe_lang(lang: str | None) -> str:
+    lang = re.sub(r"[^a-zA-Z0-9_-]", "", lang or "")
+    available = {item["code"] for item in available_locales()}
+    if lang in available:
+        return lang
+    if DEFAULT_LANG in available:
+        return DEFAULT_LANG
+    return next(iter(available), DEFAULT_LANG)
+
+
+def locale_data(lang: str) -> dict[str, Any]:
+    path = LOCALES_DIR / f"{safe_lang(lang)}.json"
+    if not path.exists():
+        path = LOCALES_DIR / f"{DEFAULT_LANG}.json"
+    if not path.exists():
+        path = LOCALES_DIR / "en.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def apply_initial_i18n(page: str, lang: str) -> str:
+    data = locale_data(lang)
+    if not data:
+        return page
+    for key, value in data.items():
+        text = html.escape(str(value), quote=False)
+        title = html.escape(str(value), quote=True)
+        page = re.sub(rf'(<[^>]+data-i18n="{re.escape(key)}"[^>]*>)(.*?)(</[^>]+>)', rf'\g<1>{text}\g<3>', page, flags=re.DOTALL)
+        page = re.sub(rf'(data-i18n-title="{re.escape(key)}"[^>]*title=")[^"]*(")', rf'\g<1>{title}\g<2>', page)
+        page = re.sub(rf'(data-i18n-placeholder="{re.escape(key)}"[^>]*placeholder=")[^"]*(")', rf'\g<1>{title}\g<2>', page)
+        page = re.sub(rf'(data-i18n-tip="{re.escape(key)}"[^>]*data-tip=")[^"]*(")', rf'\g<1>{title}\g<2>', page)
+    page = re.sub(r'<html lang="[^"]*"', f'<html lang="{html.escape(lang, quote=True)}"', page, count=1)
+    return page
+
+
+def render_login_page(error: bool = False, lang: str | None = None) -> str:
+    initial_lang = safe_lang(lang)
     error_html = '<div class="error" data-i18n="login.invalid">Invalid username or password</div>' if error else ""
-    return (
+    page = (
         LOGIN_PAGE
-        .replace("__DEFAULT_LANG__", DEFAULT_LANG)
+        .replace("__DEFAULT_LANG__", initial_lang)
         .replace("__DEFAULT_THEME__", DEFAULT_THEME)
         .replace("{error}", error_html)
     )
+    return apply_initial_i18n(page, initial_lang)
 
 
-def render_index_page() -> str:
+def render_index_page(lang: str | None = None) -> str:
     page = PAGE
+    initial_lang = safe_lang(lang)
     metrics_ui_enabled = False
     read_only_ui = READ_ONLY or not probe_config_write()[0]
     if ENABLE_METRICS:
@@ -1198,10 +1238,10 @@ def render_index_page() -> str:
         end = page.find('  <dialog id="configDialog">')
         if start != -1 and end != -1 and start < end:
             page = page[:start] + page[end:]
-    return (
+    rendered = (
         page
         .replace("__APP_VERSION__", DISPLAY_VERSION)
-        .replace("__DEFAULT_LANG__", DEFAULT_LANG)
+        .replace("__DEFAULT_LANG__", initial_lang)
         .replace("__DEFAULT_THEME__", DEFAULT_THEME)
         .replace("__WEB_AUTH_ENABLED__", "true" if ENABLE_WEB_AUTH else "false")
         .replace("__WEB_AUTH_HIDDEN__", "" if ENABLE_WEB_AUTH else "hidden")
@@ -1243,6 +1283,7 @@ def render_index_page() -> str:
             else "",
         )
     )
+    return apply_initial_i18n(rendered, initial_lang)
 
 
 app.include_router(create_pages_router(sys.modules[__name__]))
