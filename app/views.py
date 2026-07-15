@@ -74,6 +74,9 @@ LOGIN_PAGE = """
     let i18n = {};
     let locales = [];
     function t(key) { return i18n[key] || key; }
+    function saveLangCookie(lang) {
+      document.cookie = `telemt_admin_lang=${encodeURIComponent(lang)}; Max-Age=31536000; Path=/; SameSite=Lax`;
+    }
     function esc(value) {
       return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
@@ -98,6 +101,7 @@ LOGIN_PAGE = """
       const res = await fetch(`api/i18n/${encodeURIComponent(lang)}`, { credentials: "same-origin" });
       i18n = await res.json();
       localStorage.setItem("telemtAdmin.lang", lang);
+      saveLangCookie(lang);
       langSelect.value = lang;
       applyI18n();
     }
@@ -112,7 +116,9 @@ LOGIN_PAGE = """
     setTheme(localStorage.getItem("telemtAdmin.theme") || defaultTheme);
     async function bootLogin() {
       await loadLocales();
-      await loadI18n(pickLang(localStorage.getItem("telemtAdmin.lang") || defaultLang));
+      const storedLang = localStorage.getItem("telemtAdmin.lang") || "";
+      if (storedLang) saveLangCookie(storedLang);
+      await loadI18n(pickLang(storedLang || defaultLang));
     }
     bootLogin().catch(() => {});
   </script>
@@ -667,6 +673,10 @@ PAGE = r"""
       return text;
     }
 
+    function saveLangCookie(lang) {
+      document.cookie = `telemt_admin_lang=${encodeURIComponent(lang)}; Max-Age=31536000; Path=/; SameSite=Lax`;
+    }
+
     async function loadLocales() {
       const res = await fetch("api/i18n", { credentials: "same-origin" });
       const data = await res.json();
@@ -686,6 +696,7 @@ PAGE = r"""
       state.i18n = await res.json();
       state.lang = lang;
       localStorage.setItem("telemtAdmin.lang", lang);
+      saveLangCookie(lang);
       $("langSelect").value = lang;
       applyI18n();
     }
@@ -2155,6 +2166,7 @@ PAGE = r"""
     async function boot() {
       setTheme(state.theme);
       await loadLocales();
+      if (state.lang) saveLangCookie(state.lang);
       const preferred = pickLang(state.lang || "__DEFAULT_LANG__");
       await loadI18n(preferred);
       restoreUiPrefs();

@@ -19,7 +19,10 @@ def create_pages_router(ctx: Any) -> APIRouter:
         return {"status": "ok", "config": "rw" if write_ok else "ro"}
 
     @router.get("/login", response_class=HTMLResponse)
-    def login_page(credentials: HTTPBasicCredentials | None = Depends(ctx.security)):
+    def login_page(
+        credentials: HTTPBasicCredentials | None = Depends(ctx.security),
+        telemt_admin_lang: str | None = Cookie(default=None),
+    ):
         if ctx.ENABLE_BASIC_AUTH and not ctx.valid_basic(credentials):
             raise HTTPException(
                 status_code=401,
@@ -28,13 +31,14 @@ def create_pages_router(ctx: Any) -> APIRouter:
             )
         if not ctx.ENABLE_WEB_AUTH:
             return RedirectResponse("./")
-        return ctx.render_login_page()
+        return ctx.render_login_page(lang=telemt_admin_lang)
 
     @router.post("/login")
     def login_submit(
         username: str = Form(...),
         password: str = Form(...),
         credentials: HTTPBasicCredentials | None = Depends(ctx.security),
+        telemt_admin_lang: str | None = Cookie(default=None),
     ):
         if ctx.ENABLE_BASIC_AUTH and not ctx.valid_basic(credentials):
             raise HTTPException(
@@ -48,7 +52,7 @@ def create_pages_router(ctx: Any) -> APIRouter:
             response = RedirectResponse("./", status_code=303)
             response.set_cookie("telemt_admin_session", ctx.make_session_token(username), httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
             return response
-        return HTMLResponse(ctx.render_login_page(error=True), status_code=401)
+        return HTMLResponse(ctx.render_login_page(error=True, lang=telemt_admin_lang), status_code=401)
 
     @router.get("/logout")
     def logout():
@@ -61,9 +65,10 @@ def create_pages_router(ctx: Any) -> APIRouter:
         request: Request,
         credentials: HTTPBasicCredentials | None = Depends(ctx.security),
         telemt_admin_session: str | None = Cookie(default=None),
+        telemt_admin_lang: str | None = Cookie(default=None),
     ):
         if not ctx.ENABLE_BASIC_AUTH and not ctx.ENABLE_WEB_AUTH:
-            return ctx.render_index_page()
+            return ctx.render_index_page(lang=telemt_admin_lang)
         if ctx.ENABLE_BASIC_AUTH and not ctx.valid_basic(credentials):
             raise HTTPException(
                 status_code=401,
@@ -71,9 +76,9 @@ def create_pages_router(ctx: Any) -> APIRouter:
                 headers={"WWW-Authenticate": "Basic"},
             )
         if ctx.ENABLE_WEB_AUTH and ctx.valid_session_token(telemt_admin_session):
-            return ctx.render_index_page()
+            return ctx.render_index_page(lang=telemt_admin_lang)
         if ctx.ENABLE_WEB_AUTH:
             return RedirectResponse("login", status_code=303)
-        return ctx.render_index_page()
+        return ctx.render_index_page(lang=telemt_admin_lang)
 
     return router
