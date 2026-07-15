@@ -11,7 +11,7 @@ CONFIG_PATH = Path(os.getenv("TELEMT_CONFIG", "/data/telemt/config/config.toml")
 BACKUP_DIR = Path(os.getenv("TELEMT_BACKUP_DIR", "/data/backups"))
 MAX_BACKUPS = int(os.getenv("TELEMT_MAX_BACKUPS", "20"))
 APP_VERSION = os.getenv("TELEMT_ADMIN_VERSION", "dev")
-DEV_VERSION = os.getenv("TELEMT_ADMIN_DEV_VERSION", "1.4.0")
+DEV_VERSION = os.getenv("TELEMT_ADMIN_DEV_VERSION", "1.4.1")
 DISPLAY_VERSION = f"{DEV_VERSION} dev" if APP_VERSION == "dev" else APP_VERSION
 LOG_LEVEL = os.getenv("LOG_LEVEL", "ERROR")
 GITHUB_URL = "https://github.com/Vozdr/telemt-admin/"
