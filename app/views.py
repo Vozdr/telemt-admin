@@ -1917,7 +1917,8 @@ PAGE = r"""
       const sections = new Set(state.configSections);
       const query = state.configSearch.trim().toLowerCase();
       return all.filter(item => {
-        if (!state.configShowAll && !item.configured) return false;
+        const draft = configDraftEntry(item);
+        if (!state.configShowAll && !item.configured && draft?.action !== "set") return false;
         if (sections.size && !sections.has(item.section)) return false;
         if (query) {
           const haystack = `${item.key} ${item.section} ${settingSectionTitle(item.section)}`.toLowerCase();
