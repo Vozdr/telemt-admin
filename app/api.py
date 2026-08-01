@@ -151,6 +151,8 @@ def create_api_router(ctx: Any) -> APIRouter:
         lines = text.splitlines()
         if name not in ctx.parse_assignments(lines, "access.users"):
             raise HTTPException(404, "Пользователь не найден.")
+        if not ctx.can_delete_user(name, text):
+            raise HTTPException(400, "Нельзя удалить последнего активного пользователя TeleMT.")
         ctx.remove_all_user_values(lines, name)
         ctx.remove_user_with_meta(lines, name)
         ctx.write_config("\n".join(lines).rstrip() + "\n")

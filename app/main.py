@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import errno
 import html
@@ -1100,6 +1100,24 @@ def user_table_payload(user: UserRecord) -> dict[str, Any]:
     }
 
 
+def active_access_users_count(lines: list[str]) -> int:
+    return sum(1 for item in parse_assignments(lines, "access.users").values() if not item.get("blocked"))
+
+
+def can_delete_user(name: str, text: str | None = None) -> bool:
+    text = text if text is not None else read_config()
+    lines = text.splitlines()
+    users = parse_assignments(lines, "access.users")
+    user = users.get(name)
+    if not user:
+        return False
+    if len(users) <= 1:
+        return False
+    if not user.get("blocked") and active_access_users_count(lines) <= 1:
+        return False
+    return True
+
+
 def user_detail_payload(user: UserRecord) -> dict[str, Any]:
     return {
         "name": user.name,
@@ -1112,6 +1130,7 @@ def user_detail_payload(user: UserRecord) -> dict[str, Any]:
         "rate_limit_down": user.rate_limit_down,
         "comment": user.comment,
         "blocked": user.blocked,
+        "can_delete": can_delete_user(user.name),
         "added_at": user.added_at,
         "updated_at": user.updated_at,
         "blocked_at": user.blocked_at,
@@ -1266,11 +1285,15 @@ def render_index_page(lang: str | None = None) -> str:
         )
         .replace(
             "__USER_DELETE_BUTTON__",
-            "" if read_only_ui else '<button type="button" class="danger" id="deleteBtn" hidden data-i18n="common.delete">Удалить</button>',
+            "" if read_only_ui else '<span class="delete-group" id="deleteGroup" hidden><button type="button" class="danger" id="deleteBtn" hidden data-i18n="common.delete">Удалить</button></span>',
         )
         .replace(
             "__USER_SAVE_BUTTON__",
             "" if read_only_ui else '<button type="submit" class="primary" id="saveBtn" data-i18n="common.save">Сохранить</button>',
+        )
+        .replace(
+            "__USER_DELETE_HINT__",
+            "" if read_only_ui else '<span class="delete-hint" id="deleteHint" hidden data-i18n="help.keepOneUser"></span>',
         )
         .replace(
             "__CONFIG_RESET_BUTTON__",

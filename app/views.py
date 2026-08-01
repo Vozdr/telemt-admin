@@ -269,8 +269,9 @@ PAGE = r"""
     .modal-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); }
     .modal-head h2 { margin: 0; font-size: 18px; letter-spacing: 0; }
     .modal-body { padding: 18px; }
-    .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--line); background: var(--soft); }
-    .modal-foot .danger { margin-right: auto; }
+    .modal-foot { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--line); background: var(--soft); }
+    .delete-group { display: inline-flex; align-items: center; margin-right: auto; }
+    .delete-hint { flex: 0 0 100%; color: var(--muted); font-size: 11px; line-height: 1.25; }
     label { display: block; color: var(--muted); font-size: 13px; margin: 0 0 6px; }
     .label-help { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 13px; margin: 0 0 6px; }
     .help-mark { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; font-weight: 800; cursor: help; }
@@ -540,6 +541,7 @@ PAGE = r"""
         <button type="button" id="clearLimitsBtn" data-i18n="form.clearLimits">Очистить лимиты</button>
         <button type="button" id="editCloseBtn" data-close="editDialog" data-i18n="common.cancel">Отмена</button>
         __USER_SAVE_BUTTON__
+        __USER_DELETE_HINT__
       </div>
     </form>
   </dialog>
@@ -660,7 +662,7 @@ PAGE = r"""
   <div class="toast" id="toast"></div>
 
   <script>
-    const state = { users: [], domain: "", config: null, configWritable: true, configShowAll: false, configSearch: "", configSections: [], configDraft: {}, configEditing: "", configPending: false, metrics: { enabled: "__METRICS_ENABLED__" === "true", available: false, url: "" }, updatedAt: "", editing: null, editPending: false, loadingUsers: false, statsLoading: false, telemtStatsLoading: false, filter: "all", sorts: [], refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
+    const state = { users: [], domain: "", config: null, configWritable: true, editCanDelete: true, configShowAll: false, configSearch: "", configSections: [], configDraft: {}, configEditing: "", configPending: false, metrics: { enabled: "__METRICS_ENABLED__" === "true", available: false, url: "" }, updatedAt: "", editing: null, editPending: false, loadingUsers: false, statsLoading: false, telemtStatsLoading: false, filter: "all", sorts: [], refreshTimer: null, statsUser: null, statsTimer: null, telemtStatsTimer: null, lang: localStorage.getItem("telemtAdmin.lang") || "", locales: [], theme: localStorage.getItem("telemtAdmin.theme") || "__DEFAULT_THEME__", i18n: {}, webAuthEnabled: "__WEB_AUTH_ENABLED__" === "true" };
     const $ = (id) => document.getElementById(id);
     let tipHideTimer = null;
     let tipActiveTarget = null;
@@ -1319,6 +1321,7 @@ PAGE = r"""
     function addUser() {
       if (!state.configWritable) return;
       state.editing = null;
+      state.editCanDelete = true;
       $("editTitle").textContent = t("modal.addUser");
       if ($("deleteBtn")) $("deleteBtn").hidden = true;
       $("name").value = "";
@@ -1353,10 +1356,20 @@ PAGE = r"""
         $("clearLimitsBtn").style.display = readonly ? "none" : "";
         $("clearLimitsBtn").disabled = readonly;
       }
+      const deleteLocked = !state.editCanDelete;
+      if ($("deleteGroup")) {
+        $("deleteGroup").hidden = readonly || !state.editing;
+        $("deleteGroup").style.display = readonly || !state.editing ? "none" : "";
+      }
       if ($("deleteBtn")) {
         $("deleteBtn").hidden = readonly || !state.editing;
         $("deleteBtn").style.display = readonly || !state.editing ? "none" : "";
-        $("deleteBtn").disabled = readonly;
+        $("deleteBtn").disabled = readonly || deleteLocked;
+        $("deleteBtn").title = deleteLocked ? t("help.keepOneUser") : t("common.delete");
+      }
+      if ($("deleteHint")) {
+        $("deleteHint").hidden = readonly || !state.editing || !deleteLocked;
+        $("deleteHint").textContent = t("help.keepOneUser");
       }
       if ($("saveBtn")) {
         $("saveBtn").hidden = readonly;
@@ -1384,6 +1397,7 @@ PAGE = r"""
         $("secret").value = user.secret || "";
         $("comment").value = user.comment || "";
         $("blocked").checked = Boolean(user.blocked);
+        state.editCanDelete = user.can_delete !== false;
         setEditReadonly(!state.configWritable);
         openDialog("editDialog");
       } catch (err) {
@@ -2016,6 +2030,10 @@ PAGE = r"""
     }
 
     async function deleteUser(u) {
+      if (!state.editCanDelete) {
+        toast(t("help.keepOneUser"));
+        return;
+      }
       if (!confirm(t("confirm.delete", { name: u.name }))) return;
       setEditPending(true, $("deleteBtn"));
       try {
