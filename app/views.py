@@ -220,17 +220,23 @@ PAGE = r"""
     button.qr-mini { width: auto; min-width: 26px; height: 18px; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--soft-2); color: var(--ink); font-size: 10px; font-weight: 700; line-height: 16px; letter-spacing: .02em; text-transform: uppercase; transform: translateY(1px); }
     button.qr-mini:hover { background: var(--hover); border-color: var(--line-strong); color: var(--accent-dark); }
     select { height: 38px; border: 1px solid var(--line); border-radius: 7px; background: var(--control); color: var(--ink); padding: 0 10px; font: inherit; }
-    .statusbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-    .metric { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+    .statusbar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+    .metric { display: flex; align-items: center; gap: 4px; min-height: 42px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
     .metric.filter { cursor: pointer; transition: .16s ease; }
     .metric.filter:hover { border-color: #9fb5bf; transform: translateY(-1px); }
     .metric.active { border-color: #45a39d; box-shadow: 0 0 0 2px rgba(20, 125, 120, .14); background: var(--accent-soft); }
-    .metric b { display: block; font-size: 24px; line-height: 1.1; }
-    .metric span { display: block; color: var(--muted); margin-top: 6px; font-size: 13px; }
+    .metric b { font-size: 16px; line-height: 1.2; }
+    .metric span { color: var(--muted); font-size: 13px; line-height: 1.2; }
+    .metric span::after { content: ":"; }
     .table-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
     .table-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 10px; border-bottom: 1px solid var(--line); }
     .table-heading h2 { margin: 0; font-size: 14px; line-height: 28px; font-weight: 700; }
-    .table-heading input { width: min(280px, 60%); height: 28px; padding: 3px 8px; font-size: 13px; }
+    .table-search { position: relative; width: min(280px, 60%); }
+    .table-search input { height: 28px; padding: 3px 30px 3px 8px; font-size: 13px; }
+    .table-search input::-webkit-search-cancel-button { display: none; }
+    button.search-clear { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 17px; line-height: 1; }
+    button.search-clear:hover { border: 0; background: var(--hover); color: var(--ink); }
+    button.search-clear[hidden] { display: none; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; font-size: 14px; }
     th { background: var(--soft); color: var(--muted); font-weight: 600; }
@@ -417,16 +423,19 @@ PAGE = r"""
     </header>
 
     <section class="statusbar">
-      <div class="metric filter active" data-filter="all"><b id="mTotal">0</b><span data-i18n="filters.total">Всего пользователей</span></div>
-      <div class="metric filter" data-filter="active"><b id="mActive">0</b><span data-i18n="filters.active">Активны</span></div>
-      <div class="metric filter" data-filter="blocked"><b id="mBlocked">0</b><span data-i18n="filters.blocked">Заблокированы</span></div>
-      <div class="metric filter" data-filter="limited"><b id="mLimited">0</b><span data-i18n="filters.limited">С лимитами</span></div>
+      <div class="metric filter active" data-filter="all"><span data-i18n="filters.total">Всего пользователей</span><b id="mTotal">0</b></div>
+      <div class="metric filter" data-filter="active"><span data-i18n="filters.active">Активны</span><b id="mActive">0</b></div>
+      <div class="metric filter" data-filter="blocked"><span data-i18n="filters.blocked">Заблокированы</span><b id="mBlocked">0</b></div>
+      <div class="metric filter" data-filter="limited"><span data-i18n="filters.limited">С лимитами</span><b id="mLimited">0</b></div>
     </section>
 
     <section class="table-wrap">
       <div class="table-heading">
         <h2 data-i18n="table.users">Пользователи</h2>
-        <input id="userSearch" type="search" autocomplete="off" aria-label="Поиск пользователей" data-i18n-aria-label="table.search" data-i18n-placeholder="table.searchPlaceholder" placeholder="Имя или комментарий">
+        <div class="table-search">
+          <input id="userSearch" type="search" autocomplete="off" aria-label="Поиск пользователей" data-i18n-aria-label="table.search" data-i18n-placeholder="table.searchPlaceholder" placeholder="Имя или комментарий">
+          <button type="button" class="search-clear" id="clearUserSearch" data-i18n-title="table.clearSearch" data-i18n-aria-label="table.clearSearch" title="Очистить поиск" aria-label="Очистить поиск" hidden>×</button>
+        </div>
       </div>
       <table>
         <thead>
@@ -1299,6 +1308,7 @@ PAGE = r"""
       rows.innerHTML = "";
       const visible = sortedUsers(filteredUsers());
       const query = $("userSearch").value.trim();
+      $("clearUserSearch").hidden = !$("userSearch").value;
       $("empty").hidden = visible.length > 0;
       $("empty").textContent = state.users.length ? t("table.noMatches") : t("table.empty");
       const active = state.users.filter(u => !u.blocked).length;
@@ -2165,6 +2175,11 @@ PAGE = r"""
     $("langSelect").onchange = () => loadI18n($("langSelect").value).then(load).catch(err => toast(err.message));
     $("themeSelect").onchange = () => setTheme($("themeSelect").value);
     $("userSearch").addEventListener("input", render);
+    $("clearUserSearch").addEventListener("click", () => {
+      $("userSearch").value = "";
+      render();
+      $("userSearch").focus();
+    });
     $("refreshInterval").onchange = () => {
       if (state.refreshTimer) clearInterval(state.refreshTimer);
       const interval = Number($("refreshInterval").value);
