@@ -228,6 +228,8 @@ PAGE = r"""
     .metric b { display: block; font-size: 24px; line-height: 1.1; }
     .metric span { display: block; color: var(--muted); margin-top: 6px; font-size: 13px; }
     .table-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .table-search { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .table-search input { width: min(320px, 100%); height: 36px; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; font-size: 14px; }
     th { background: var(--soft); color: var(--muted); font-weight: 600; }
@@ -420,6 +422,9 @@ PAGE = r"""
     </section>
 
     <section class="table-wrap">
+      <div class="table-search">
+        <input id="userSearch" type="search" autocomplete="off" aria-label="Поиск пользователей" data-i18n-aria-label="table.search" data-i18n-placeholder="table.searchPlaceholder" placeholder="Имя или комментарий">
+      </div>
       <table>
         <thead>
           <tr>
@@ -713,6 +718,9 @@ PAGE = r"""
       document.querySelectorAll("[data-i18n-placeholder]").forEach(el => {
         el.placeholder = t(el.dataset.i18nPlaceholder);
       });
+      document.querySelectorAll("[data-i18n-aria-label]").forEach(el => {
+        el.setAttribute("aria-label", t(el.dataset.i18nAriaLabel));
+      });
       document.querySelectorAll("[data-i18n-tip]").forEach(el => {
         el.dataset.tip = t(el.dataset.i18nTip);
       });
@@ -951,10 +959,13 @@ PAGE = r"""
     }
 
     function filteredUsers() {
-      if (state.filter === "active") return state.users.filter(u => !u.blocked);
-      if (state.filter === "blocked") return state.users.filter(u => u.blocked);
-      if (state.filter === "limited") return state.users.filter(hasUserLimits);
-      return state.users;
+      const query = $("userSearch").value.trim().toLocaleLowerCase();
+      return state.users.filter(u => {
+        if (state.filter === "active" && u.blocked) return false;
+        if (state.filter === "blocked" && !u.blocked) return false;
+        if (state.filter === "limited" && !hasUserLimits(u)) return false;
+        return !query || `${u.name} ${u.comment || ""}`.toLocaleLowerCase().includes(query);
+      });
     }
 
     const SORT_KEYS = ["name", "comment", "stats", "added", "limit", "status"];
@@ -1263,6 +1274,7 @@ PAGE = r"""
       rows.innerHTML = "";
       const visible = sortedUsers(filteredUsers());
       $("empty").hidden = visible.length > 0;
+      $("empty").textContent = state.users.length ? t("table.noMatches") : t("table.empty");
       const active = state.users.filter(u => !u.blocked).length;
       const blocked = state.users.length - active;
       const limited = state.users.filter(hasUserLimits).length;
@@ -2126,6 +2138,7 @@ PAGE = r"""
     $("floatTip").onmouseleave = hideFloatTipSoon;
     $("langSelect").onchange = () => loadI18n($("langSelect").value).then(load).catch(err => toast(err.message));
     $("themeSelect").onchange = () => setTheme($("themeSelect").value);
+    $("userSearch").addEventListener("input", render);
     $("refreshInterval").onchange = () => {
       if (state.refreshTimer) clearInterval(state.refreshTimer);
       const interval = Number($("refreshInterval").value);

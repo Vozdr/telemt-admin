@@ -63,6 +63,23 @@ TELEMT_METRICS_URL=http://127.0.0.1:9090/metrics
 Do not publish port `9090` to the internet. It only needs to be reachable inside
 the Docker network.
 
+## Docker image releases
+
+GitHub Actions builds `linux/amd64` and `linux/arm/v7` images and publishes the
+multi-architecture image to [Docker Hub](https://hub.docker.com/r/w03zd8rc/telemt-admin).
+Pushes to `main` update `latest`; pushing a tag such as `v1.5.0` publishes `1.5.0`.
+
+Add these GitHub repository Actions secrets before the first workflow run:
+
+| Secret | Value |
+| --- | --- |
+| `DOCKERHUB_USERNAME` | Docker Hub account with push access to `w03zd8rc/telemt-admin` |
+| `DOCKERHUB_TOKEN` | Docker Hub access token with repository push access |
+
+The image version is set by the workflow. Release commits and tags use the
+`TeleMT Admin Builder` Git author identity; GitHub Actions does not need a GitHub deploy
+key or personal access token to read the repository.
+
 ## Docker run
 
 ```bash
