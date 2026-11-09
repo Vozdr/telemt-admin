@@ -241,6 +241,33 @@ def clean_comment(comment: str) -> str:
     return " ".join(comment.replace("\n", " ").replace("\r", " ").strip().split())
 
 
+USER_COMMENT_PREFIX = "telemt-admin-comment: "
+
+
+def normalize_user_comment(comment: str) -> str:
+    return comment.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def quote_user_comment(comment: str) -> str:
+    comment = normalize_user_comment(comment)
+    if not comment:
+        return ""
+    if comment.startswith(USER_COMMENT_PREFIX) or any(ord(char) < 32 for char in comment):
+        return f" # {USER_COMMENT_PREFIX}{json.dumps(comment, ensure_ascii=False)}"
+    return f" # {comment}"
+
+
+def parse_user_comment(comment: str) -> str:
+    if comment.startswith(USER_COMMENT_PREFIX):
+        try:
+            value = json.loads(comment[len(USER_COMMENT_PREFIX):])
+            if isinstance(value, str):
+                return value
+        except json.JSONDecodeError:
+            pass
+    return comment
+
+
 def quote_comment(comment: str) -> str:
     comment = clean_comment(comment)
     return f" # {comment}" if comment else ""
@@ -705,6 +732,8 @@ def parse_assignments(lines: list[str], section: str) -> dict[str, dict[str, Any
         key = m.group("key")
         trail = (m.group("trail") or "").strip()
         comment = trail[1:].strip() if trail.startswith("#") else ""
+        if section == "access.users":
+            comment = parse_user_comment(comment)
         metadata = pending_meta if pending_meta and pending_meta.get("user") == key else {}
         result[key] = {
             "line": idx,
@@ -850,7 +879,7 @@ def validate_expiration(value: str) -> str:
 
 def line_for_user(name: str, secret: str, comment: str, blocked: bool) -> str:
     prefix = "# " if blocked else ""
-    return f'{prefix}{name} = "{secret}"{quote_comment(comment)}'
+    return f'{prefix}{name} = "{secret}"{quote_user_comment(comment)}'
 
 
 def line_for_meta(name: str, added_at: str = "", updated_at: str = "", blocked_at: str = "") -> str | None:
@@ -890,7 +919,7 @@ def blocked_comment(blocked_at: str) -> str:
 
 
 def strip_blocked_comment(comment: str) -> str:
-    comment = clean_comment(comment)
+    comment = normalize_user_comment(comment)
     return "" if comment.startswith("blocked_at=") else comment
 
 
@@ -973,7 +1002,7 @@ def upsert_user(data: UserInput, old_name: str | None = None) -> None:
     if old_name:
         validate_name(old_name)
     secret = validate_secret(data.secret or generated_secret())
-    comment = clean_comment(data.comment)
+    comment = normalize_user_comment(data.comment)
     expiration = validate_expiration(data.expiration)
 
     text = read_config()

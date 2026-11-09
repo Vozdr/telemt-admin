@@ -228,8 +228,9 @@ PAGE = r"""
     .metric b { display: block; font-size: 24px; line-height: 1.1; }
     .metric span { display: block; color: var(--muted); margin-top: 6px; font-size: 13px; }
     .table-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-    .table-search { padding: 10px 12px; border-bottom: 1px solid var(--line); }
-    .table-search input { width: min(320px, 100%); height: 36px; }
+    .table-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+    .table-heading h2 { margin: 0; font-size: 14px; line-height: 28px; font-weight: 700; }
+    .table-heading input { width: min(280px, 60%); height: 28px; padding: 3px 8px; font-size: 13px; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; font-size: 14px; }
     th { background: var(--soft); color: var(--muted); font-weight: 600; }
@@ -243,7 +244,8 @@ PAGE = r"""
     tr.blocked { color: var(--muted); background: var(--blocked-bg); }
     .name-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
     .name { color: var(--ink); font-weight: 700; overflow-wrap: anywhere; text-align: left; min-width: 0; }
-    .comment { color: var(--muted); overflow-wrap: anywhere; max-width: 260px; line-height: 1.35; }
+    .comment { color: var(--muted); overflow-wrap: anywhere; white-space: pre-line; max-width: 260px; line-height: 1.35; }
+    mark.search-hit { background: #f9d65c; color: #241e10; border-radius: 2px; padding: 0 1px; }
     .pill { display: inline-flex; align-items: center; height: 24px; border-radius: 999px; padding: 0 9px; font-size: 12px; border: 1px solid var(--line); background: var(--control); white-space: nowrap; }
     .pill small { display: block; font-size: 11px; line-height: 1.15; opacity: .78; }
     .pill.ok { color: var(--ok); border-color: var(--line); background: var(--accent-soft); }
@@ -422,7 +424,8 @@ PAGE = r"""
     </section>
 
     <section class="table-wrap">
-      <div class="table-search">
+      <div class="table-heading">
+        <h2 data-i18n="table.users">Пользователи</h2>
         <input id="userSearch" type="search" autocomplete="off" aria-label="Поиск пользователей" data-i18n-aria-label="table.search" data-i18n-placeholder="table.searchPlaceholder" placeholder="Имя или комментарий">
       </div>
       <table>
@@ -1269,10 +1272,33 @@ PAGE = r"""
       return String(value).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
 
+    function setHighlightedText(element, value, query) {
+      const source = String(value);
+      element.replaceChildren();
+      if (!query) {
+        element.textContent = source;
+        return;
+      }
+      const lower = source.toLocaleLowerCase();
+      const needle = query.toLocaleLowerCase();
+      let start = 0;
+      let match;
+      while ((match = lower.indexOf(needle, start)) !== -1) {
+        element.append(document.createTextNode(source.slice(start, match)));
+        const mark = document.createElement("mark");
+        mark.className = "search-hit";
+        mark.textContent = source.slice(match, match + needle.length);
+        element.append(mark);
+        start = match + needle.length;
+      }
+      element.append(document.createTextNode(source.slice(start)));
+    }
+
     function render() {
       const rows = $("rows");
       rows.innerHTML = "";
       const visible = sortedUsers(filteredUsers());
+      const query = $("userSearch").value.trim();
       $("empty").hidden = visible.length > 0;
       $("empty").textContent = state.users.length ? t("table.noMatches") : t("table.empty");
       const active = state.users.filter(u => !u.blocked).length;
@@ -1303,11 +1329,11 @@ PAGE = r"""
           <td><div class="date-cell"></div></td>
           <td class="limits-td"></td>
           <td><div class="status-cell">__USER_TOGGLE_BUTTON__<span class="pill ${u.blocked ? "off" : "ok"}">${u.blocked ? t("status.blocked") : t("status.active")}</span></div></td>`;
-        tr.querySelector(".name").textContent = u.name;
+        setHighlightedText(tr.querySelector(".name"), u.name, query);
         const editBtn = tr.querySelector('[data-act="edit"]');
         editBtn.textContent = state.configWritable ? t("button.editShort") : t("button.viewShort");
         editBtn.title = state.configWritable ? t("button.edit") : t("modal.viewUser");
-        tr.querySelector(".comment").textContent = u.comment || "—";
+        setHighlightedText(tr.querySelector(".comment"), u.comment || "—", query);
         const statsEl = renderStatCell(tr.querySelector(".stat-td"), u.stats);
         tr.querySelector(".date-cell").innerHTML = `<span class="date-help">${esc(formatDate(u.added_at))}<span class="tip">${esc(t("date.lastChanged"))}: ${esc(formatDate(u.updated_at))}</span></span>`;
         renderLimitsCell(tr.querySelector(".limits-td"), u);

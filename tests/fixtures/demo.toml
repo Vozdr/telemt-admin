@@ -1,0 +1,11 @@
+[server]
+port = 443
+public_host = "example.com"
+public_port = 443
+
+[access.users]
+ivan = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" # telemt-admin-comment: "Иван\nДал ненадолго"
+alex = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" # Александр Иванов
+
+[access.user_enabled]
+alex = false # blocked_at=2026-11-09T12:00:00+05:00

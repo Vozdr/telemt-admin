@@ -24,6 +24,7 @@
   "table.status": "Status",
   "table.empty": "No users yet.",
   "table.search": "Search users",
+  "table.users": "Users",
   "table.searchPlaceholder": "Name or comment",
   "table.noMatches": "No matching users.",
   "status.active": "Active",

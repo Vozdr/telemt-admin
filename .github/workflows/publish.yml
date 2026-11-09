@@ -22,6 +22,10 @@ jobs:
         run: |
           python -m compileall -q app
           python -c 'import json, pathlib; [json.loads(path.read_text(encoding="utf-8")) for path in pathlib.Path("app/locales").glob("*.json")]'
+      - name: Test user comments
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest discover -s tests -v
 
   build:
     name: Build ${{ matrix.arch }}
@@ -51,7 +55,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             echo "IMAGE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           else
-            echo "IMAGE_VERSION=dev" >> "$GITHUB_ENV"
+            echo "IMAGE_VERSION=$(cat app/VERSION)" >> "$GITHUB_ENV"
           fi
       - id: build
         uses: docker/build-push-action@v6

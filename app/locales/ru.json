@@ -24,6 +24,7 @@
   "table.status": "Статус",
   "table.empty": "Пользователей пока нет.",
   "table.search": "Поиск пользователей",
+  "table.users": "Пользователи",
   "table.searchPlaceholder": "Имя или комментарий",
   "table.noMatches": "Пользователи не найдены.",
   "status.active": "Активен",
